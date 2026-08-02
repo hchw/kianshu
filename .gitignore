@@ -1,0 +1,54 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.dbg
+
+# Test binary built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.tmp
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Codegraph index
+.codegraph/
+
+# Local build artifacts
+/dist/
+/bin/
+/tmp/
+*.log
+.opencode
+openspec
+server
+*.db

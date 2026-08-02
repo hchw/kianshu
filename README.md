@@ -21,86 +21,6 @@
 - **版本快照自包含**：每次保存启用生成不可变版本，历史版本/日志可精确复原，不依赖当前 Swagger 状态。
 - **LLM Agent 编辑闭环**：50 轮工具调用上限、每轮实时推送、校验失败重试，把补适配器/调整参数交给 LLM 完成。
 
-## 总体架构（领域模型）
-
-```mermaid
-classDiagram
-    direction LR
-
-    class User {
-        +id
-        +username
-        +password
-    }
-    class Provider {
-        +id
-        +name
-        +baseUrl
-        +apiKey
-        +model
-    }
-    class TestSet {
-        +id
-        +name
-        +host（单环境）
-    }
-    class Member {
-        +role（owner/read/edit）
-    }
-    class Import {
-        +id
-        +rawSwagger
-    }
-    class TestUnit {
-        +id
-        +method + path（唯一）
-        +tag
-        +完整接口信息（冗余）
-        +softDeleted
-    }
-    class Flow {
-        +id
-        +name
-    }
-    class ExecutionNode {
-        +type（start/api/assert/loop/try/catch/cache-set/adapter）
-        +inputs / outputs（契约）
-        +config
-    }
-    class Version {
-        +id
-        +snapshot（整棵执行树快照）
-    }
-    class Run {
-        +id
-        +status
-        +time
-    }
-    class Session {
-        +id
-        +history
-    }
-    class Schedule {
-        +id
-        +cron
-    }
-
-    User "1" --> "*" TestSet : 拥有
-    User "1" --> "*" Provider : 配置
-    TestSet "*" o-- "*" User : 成员（Member 记录角色）
-    TestSet "1" --> "*" Import : 多次导入
-    TestSet "1" --> "*" TestUnit : 解析派生
-    TestSet "1" --> "*" Flow : 包含
-    Flow "1" --> "*" Version : 版本快照
-    Version "1" --> "*" ExecutionNode : 执行树（单根、无环）
-    Flow "1" --> "*" Run : 执行日志
-    Run "*" --> "1" Version : 关联快照可复原
-    Flow "1" --> "*" Session : 按流会话
-    Flow "1" --> "*" Schedule : 定时任务
-
-    %% api 节点冗余引用测试单元；cache-set 节点不参与连线（共享缓存旁路）
-```
-
 ## 核心功能
 
 | 能力 | 说明 |
@@ -123,32 +43,18 @@ classDiagram
 - **LLM**：用户级 Provider，兼容 OpenAI 协议
 - **调度**：gocron（默认），插件化可替换
 
-## 项目结构
-
-```
-kianshu/
-├── cmd/server/          # 服务入口
-├── internal/
-│   ├── config/          # 配置加载
-│   ├── crypto/          # AES 加密套件
-│   ├── db/              # GORM 数据层
-│   ├── exec/            # 执行引擎（遍历 / try/catch / loop / 共享缓存）
-│   ├── flow/            # 执行树模型与全树校验
-│   ├── httpapi/         # REST API
-│   ├── jsonata/         # JSONata 适配器
-│   ├── model/           # 领域模型
-│   ├── openai/          # OpenAI 兼容客户端
-│   └── service/         # 业务服务（swagger 导入 / 权限 / 试运行 / 流服务）
-├── web/                 # React 前端（规划中）
-└── kianshu.png          # 项目 Logo
-```
 
 ## 快速开始
 
 ```bash
 # 启动后端（默认 SQLite）
 go run ./cmd/server
+
+# API 文档（Swagger UI，需先启动服务）
+# 访问 http://localhost:8080/swagger/index.html
 ```
+
+> 生成 Swagger 文档:修改接口注释后执行 `make swagger`（需安装 `swag`，`go install github.com/swaggo/swag/cmd/swag@latest`）。
 
 > 前端 `web/` 与更多配置说明将在后续版本补充。
 

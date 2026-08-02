@@ -1,0 +1,3078 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "鉴枢(kianshu) — AI 驱动的集成测试平台 REST API。除注册、登录外,所有接口均需携带会话令牌:`Authorization: Bearer \u003ctoken\u003e`(token 由登录接口返回)。权限模型:owner 完全控制;成员角色 read(只读)/ edit(可编辑)。",
+        "title": "鉴枢 kianshu API",
+        "contact": {},
+        "version": "1.0.0"
+    },
+    "basePath": "/api",
+    "paths": {
+        "/auth/login": {
+            "post": {
+                "description": "校验用户名与密码,成功后签发会话令牌。令牌需在后续请求中通过 `Authorization: Bearer \u003ctoken\u003e` 携带。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "认证"
+                ],
+                "summary": "用户登录",
+                "parameters": [
+                    {
+                        "description": "登录凭据",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.registerReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "登录成功,返回 token",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.loginResp"
+                        }
+                    },
+                    "400": {
+                        "description": "请求体不合法",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "401": {
+                        "description": "用户名或密码错误",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "使当前会话令牌立即失效。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "认证"
+                ],
+                "summary": "退出登录",
+                "responses": {
+                    "200": {
+                        "description": "已退出",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.okResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/register": {
+            "post": {
+                "description": "使用用户名与密码注册新账号。用户名至少 3 字符,密码至少 6 字符,用户名全局唯一。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "认证"
+                ],
+                "summary": "注册账号",
+                "parameters": [
+                    {
+                        "description": "注册信息",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.registerReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "注册成功",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.registerResp"
+                        }
+                    },
+                    "400": {
+                        "description": "参数不合法 / 用户名已存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "服务端错误",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/agent/new": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "清空流的 LLM 会话历史,开启全新会话。需要编辑权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Agent"
+                ],
+                "summary": "重置 Agent 会话",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "新会话 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.agentNewResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "重置会话失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/agent/resume": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "当生成流程在冲突/暂停点停下时,提交对暂停问题的回答以继续。需要编辑权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Agent"
+                ],
+                "summary": "恢复 Agent 生成(回答暂停问题)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "provider_id 与 answers 必填",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.agentResumeReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "恢复执行结果",
+                        "schema": {
+                            "$ref": "#/definitions/service.AgentResult"
+                        }
+                    },
+                    "400": {
+                        "description": "参数不合法 / Provider 未启用",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "Provider 不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "409": {
+                        "description": "该流已有正在进行的提交",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "继续生成失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/agent/session": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回流的 LLM 会话状态:status(active/paused)、历史消息与待回答的暂停问题。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Agent"
+                ],
+                "summary": "获取 Agent 会话",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "会话状态",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.agentSessionView"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "读取会话失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/agent/submit": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "向 LLM Agent 提交一次指令,按需生成或编辑测试流。请求头 Accept 含 text/event-stream 时以 SSE 逐轮推送工具事件,否则返回聚合结果。mode 为 edit(默认)或 generate。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Agent"
+                ],
+                "summary": "提交 LLM Agent 指令(生成/编辑)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "提交内容(provider_id 与 instruction 必填)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.agentSubmitReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Agent 执行结果(events 为各轮工具事件)",
+                        "schema": {
+                            "$ref": "#/definitions/service.AgentResult"
+                        }
+                    },
+                    "400": {
+                        "description": "参数不合法 / Provider 未启用",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "Provider 或流不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "409": {
+                        "description": "该流已有正在进行的提交",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "执行失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/draft": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回流的可编辑草稿,tree 为整棵执行树快照(JSON 字符串)。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "获取流草稿",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "草稿内容",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.draftView"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "草稿不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "保存流的可编辑草稿。tree 可为内联 JSON 对象或 JSON 编码字符串。需要编辑权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "更新流草稿",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "草稿内容(必须包含 tree)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.updateDraftReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "保存后的草稿记录",
+                        "schema": {
+                            "$ref": "#/definitions/model.FlowDraft"
+                        }
+                    },
+                    "400": {
+                        "description": "请求体不合法 / tree 格式不合法 / 校验失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "保存草稿失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/draft/trial-run": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "对当前草稿执行一次试运行,返回执行日志(含各节点结果)。不生成版本。需要编辑权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "草稿试运行",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "执行日志",
+                        "schema": {
+                            "$ref": "#/definitions/model.ExecutionLog"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "试运行失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/draft/validate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "对当前草稿执行全树校验(单根、无环、I/O 契约、JSONata 语法、try/catch 配对、loop 输入、缓存键静态可见、软删单元告警)。返回 errors 与 warnings 两类发现。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "校验流草稿",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "校验结果(errors / warnings)",
+                        "schema": {
+                            "$ref": "#/definitions/flow.Result"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID / 草稿解析失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "草稿不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/runs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回流的全部执行日志记录。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "列出执行日志",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "执行日志列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.runListResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "查询执行日志失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/runs/{runID}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回单条执行日志(含关联版本快照与各节点结果),可用于复原。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "获取执行日志",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "执行日志 ID",
+                        "name": "runID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "执行日志",
+                        "schema": {
+                            "$ref": "#/definitions/model.ExecutionLog"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "执行日志不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "读取执行日志失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/schedules": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回流的全部 cron 调度任务。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "定时调度"
+                ],
+                "summary": "列出定时调度",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "调度任务列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.scheduleListResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "查询失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "为流注册一个 cron 表达式调度,创建后即启用。需要编辑权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "定时调度"
+                ],
+                "summary": "创建定时调度",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "cron 表达式",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.createScheduleReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建的调度任务",
+                        "schema": {
+                            "$ref": "#/definitions/model.FlowSchedule"
+                        }
+                    },
+                    "400": {
+                        "description": "cron 表达式不能为空 / 无效",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "创建失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/schedules/{scheduleID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "删除指定调度任务,不再触发。需要编辑权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "定时调度"
+                ],
+                "summary": "删除定时调度",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "调度任务 ID",
+                        "name": "scheduleID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "已删除",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.deletedResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "调度任务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "删除失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "修改指定调度任务的 cron 表达式。需要编辑权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "定时调度"
+                ],
+                "summary": "更新定时调度",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "调度任务 ID",
+                        "name": "scheduleID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "新的 cron 表达式",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.createScheduleReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的调度任务",
+                        "schema": {
+                            "$ref": "#/definitions/model.FlowSchedule"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID / cron 表达式无效",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "调度任务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "更新失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/schedules/{scheduleID}/enabled": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "设置调度任务是否触发(暂停/恢复)。需要编辑权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "定时调度"
+                ],
+                "summary": "启停定时调度",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "调度任务 ID",
+                        "name": "scheduleID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "是否启用",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.setScheduleEnabledReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的调度任务",
+                        "schema": {
+                            "$ref": "#/definitions/model.FlowSchedule"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID / 请求体不合法",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "调度任务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "更新失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回流的所有不可变版本快照。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "列出流版本",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "版本列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.versionListResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "查询版本失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "将当前草稿固化为不可变版本并设为启用。校验失败时返回 422 及校验详情。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "保存并启用版本",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "固化的版本快照",
+                        "schema": {
+                            "$ref": "#/definitions/model.FlowVersion"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "422": {
+                        "description": "流校验失败(含 validation 详情)",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "保存启用失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/versions/{versionNo}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "按版本号返回指定版本的自包含快照,可用于精确复原。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "获取流版本",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "版本号",
+                        "name": "versionNo",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "版本快照",
+                        "schema": {
+                            "$ref": "#/definitions/model.FlowVersion"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "版本不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "读取版本失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/versions/{versionNo}/run": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "执行指定版本的快照并写入执行日志。需要编辑权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "执行流版本",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "版本号",
+                        "name": "versionNo",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "执行日志",
+                        "schema": {
+                            "$ref": "#/definitions/model.ExecutionLog"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "版本不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "执行版本失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回当前用户配置的全部 LLM Provider,响应中不包含 API 密钥。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Provider"
+                ],
+                "summary": "列出 LLM Provider",
+                "responses": {
+                    "200": {
+                        "description": "Provider 列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.providerListResp"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "创建兼容 OpenAI 协议的 LLM Provider。name 与 base_url 必填;api_key 会被加密存储,响应不回显。默认启用。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Provider"
+                ],
+                "summary": "创建 LLM Provider",
+                "parameters": [
+                    {
+                        "description": "Provider 配置",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.providerReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建的 Provider(不含 api_key)",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.providerView"
+                        }
+                    },
+                    "400": {
+                        "description": "name 与 base_url 必填",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "密钥加密失败 / 创建失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回指定 Provider 的配置(不含 API 密钥)。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Provider"
+                ],
+                "summary": "获取 LLM Provider",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Provider 配置",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.providerView"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 Provider ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "Provider 不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "删除指定 Provider 配置。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Provider"
+                ],
+                "summary": "删除 LLM Provider",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "已删除",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.okResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 Provider ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "Provider 不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新 Provider 的字段,仅更新传入字段。api_key 传入时重新加密存储。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Provider"
+                ],
+                "summary": "更新 LLM Provider",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "更新内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.providerReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的 Provider",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.providerView"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID / 请求体不合法",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "Provider 不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "更新失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/{id}/test": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "使用配置的 base_url / api_key / model 发起一次连通性测试。ok=false 时 error 字段给出原因。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Provider"
+                ],
+                "summary": "测试 Provider 连通性",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "测试结果(ok 为是否连通,失败时含 error)",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.providerTestResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 Provider ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "Provider 不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "密钥解密失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回当前用户拥有或作为成员参与的所有测试集。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试集"
+                ],
+                "summary": "列出测试集",
+                "responses": {
+                    "200": {
+                        "description": "测试集列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.testSetListResp"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "创建一个新测试集,创建者即为 owner(完全权限)。host 为单一环境地址,可选。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试集"
+                ],
+                "summary": "创建测试集",
+                "parameters": [
+                    {
+                        "description": "测试集信息",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.createTestSetReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建成功",
+                        "schema": {
+                            "$ref": "#/definitions/model.TestSet"
+                        }
+                    },
+                    "400": {
+                        "description": "名称不能为空",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "创建失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "需要对该测试集具备读权限(owner / read / edit)。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试集"
+                ],
+                "summary": "获取测试集详情",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "测试集详情",
+                        "schema": {
+                            "$ref": "#/definitions/model.TestSet"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的测试集 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该测试集",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "测试集不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新名称或 host,字段可省略(仅更新传入字段)。需要 edit 或 owner 权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试集"
+                ],
+                "summary": "更新测试集",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "更新内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.updateTestSetReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的测试集",
+                        "schema": {
+                            "$ref": "#/definitions/model.TestSet"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID / 请求体不合法 / 无更新内容",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "测试集不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}/flows": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回测试集内的所有测试流(仅元信息,执行树在草稿/版本中)。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "列出测试流",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "测试流列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.flowListResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的测试集 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该测试集",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "查询失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "在测试集内创建一个测试流。需要编辑权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "创建测试流",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "流名称",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.createFlowReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建的测试流",
+                        "schema": {
+                            "$ref": "#/definitions/model.TestFlow"
+                        }
+                    },
+                    "400": {
+                        "description": "名称不能为空 / 无效的测试集 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "创建失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}/imports": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "将 Swagger 2.0 / OpenAPI 3.x 文档导入测试集,按 method+path 去重生成/更新测试单元。content 可为 swagger JSON 对象或 JSON 字符串;source 为来源标识(可选)。若文档非标准且 confirm 为 false,返回 422 需用户确认。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试单元"
+                ],
+                "summary": "导入 Swagger",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "导入内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.importReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "导入成功(created/updated 为新增与更新数量)",
+                        "schema": {
+                            "$ref": "#/definitions/service.ImportResult"
+                        }
+                    },
+                    "400": {
+                        "description": "content 不合法 / 文档无法解析导入",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "422": {
+                        "description": "文档非标准,需 confirm=true 后重试",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.importConfirmResp"
+                        }
+                    },
+                    "500": {
+                        "description": "导入失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}/members": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "为测试集添加成员并指定角色(read|edit)。已存在则更新角色。仅 owner 可管理成员。不能把自己加为成员。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试集"
+                ],
+                "summary": "添加/更新成员",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "成员信息(user_id 与角色 read/edit)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.addMemberReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成员记录",
+                        "schema": {
+                            "$ref": "#/definitions/model.TestSetMember"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID / 角色不合法 / 目标用户不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "仅 owner 可管理成员",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "服务端错误",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}/members/{userID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "将指定用户从测试集成员中移除。仅 owner 可管理成员。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试集"
+                ],
+                "summary": "移除成员",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "要移除的用户 ID",
+                        "name": "userID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "已移除",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.okResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "仅 owner 可管理成员",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}/units": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "按测试集列出测试单元,支持 tag / method / 关键字(q,匹配 name、path、slug)过滤;include_deleted=true 时包含已软删单元。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试单元"
+                ],
+                "summary": "查询测试单元",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 tag 过滤",
+                        "name": "tag",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按请求方法过滤(GET/POST/...)",
+                        "name": "method",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "关键字,匹配名称/路径/slug",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "是否包含已软删单元,默认 false",
+                        "name": "include_deleted",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "测试单元列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.unitListResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的测试集 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该测试集",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "查询失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}/units/tool-list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "供 LLM agent 工具使用的精简单元列表,最多 500 条,不含软删单元。支持 tag / 关键字 q 过滤。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试单元"
+                ],
+                "summary": "查询测试单元(工具精简版)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 tag 过滤",
+                        "name": "tag",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "关键字,匹配名称/路径/slug",
+                        "name": "q",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "精简单元列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.unitBriefListResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的测试集 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该测试集",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "查询失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}/units/{unitID}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回单个测试单元的完整信息(含请求/响应/安全契约的原始 JSON)。需要读权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试单元"
+                ],
+                "summary": "获取测试单元",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "测试单元 ID",
+                        "name": "unitID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "测试单元",
+                        "schema": {
+                            "$ref": "#/definitions/model.TestUnit"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该测试集",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "单元不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "软删除指定测试单元;历史版本引用的接口信息不受影响。需要编辑权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试单元"
+                ],
+                "summary": "删除测试单元(软删)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "测试单元 ID",
+                        "name": "unitID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "已删除",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.okResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "单元不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "flow.Level": {
+            "type": "string",
+            "enum": [
+                "error",
+                "warning"
+            ],
+            "x-enum-varnames": [
+                "LevelError",
+                "LevelWarning"
+            ]
+        },
+        "flow.Result": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/flow.ValidationError"
+                    }
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/flow.ValidationError"
+                    }
+                }
+            }
+        },
+        "flow.ValidationError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "expected_format": {
+                    "type": "string"
+                },
+                "level": {
+                    "$ref": "#/definitions/flow.Level"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.addMemberReq": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "httpapi.agentNewResp": {
+            "type": "object",
+            "properties": {
+                "ok": {
+                    "type": "boolean"
+                },
+                "session_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "httpapi.agentResumeReq": {
+            "type": "object",
+            "properties": {
+                "answers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.PauseAnswer"
+                    }
+                },
+                "provider_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "httpapi.agentSessionView": {
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "items": {}
+                },
+                "pending_questions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.PauseQuestion"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.agentSubmitReq": {
+            "type": "object",
+            "properties": {
+                "instruction": {
+                    "type": "string"
+                },
+                "mode": {
+                    "description": "edit | generate",
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "integer"
+                },
+                "selected_nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "httpapi.createFlowReq": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.createScheduleReq": {
+            "type": "object",
+            "properties": {
+                "cron": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.createTestSetReq": {
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.deletedResp": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "httpapi.draftView": {
+            "type": "object",
+            "properties": {
+                "flow_id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tree": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.errorResp": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.flowListResp": {
+            "type": "object",
+            "properties": {
+                "flows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.TestFlow"
+                    }
+                }
+            }
+        },
+        "httpapi.importConfirmResp": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "need_confirmation": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "httpapi.importReq": {
+            "type": "object",
+            "properties": {
+                "confirm": {
+                    "type": "boolean"
+                },
+                "content": {
+                    "type": "object"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.loginResp": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.okResp": {
+            "type": "object",
+            "properties": {
+                "ok": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "httpapi.providerListResp": {
+            "type": "object",
+            "properties": {
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.providerView"
+                    }
+                }
+            }
+        },
+        "httpapi.providerReq": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "base_url": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.providerTestResp": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "httpapi.providerView": {
+            "type": "object",
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.registerReq": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.registerResp": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.runListResp": {
+            "type": "object",
+            "properties": {
+                "runs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ExecutionLog"
+                    }
+                }
+            }
+        },
+        "httpapi.scheduleListResp": {
+            "type": "object",
+            "properties": {
+                "schedules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.FlowSchedule"
+                    }
+                }
+            }
+        },
+        "httpapi.setScheduleEnabledReq": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "httpapi.testSetListResp": {
+            "type": "object",
+            "properties": {
+                "test_sets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.TestSet"
+                    }
+                }
+            }
+        },
+        "httpapi.unitBrief": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "method": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "security": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "tag": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.unitBriefListResp": {
+            "type": "object",
+            "properties": {
+                "units": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.unitBrief"
+                    }
+                }
+            }
+        },
+        "httpapi.unitListResp": {
+            "type": "object",
+            "properties": {
+                "units": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.TestUnit"
+                    }
+                }
+            }
+        },
+        "httpapi.updateDraftReq": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "tree": {}
+            }
+        },
+        "httpapi.updateTestSetReq": {
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.versionListResp": {
+            "type": "object",
+            "properties": {
+                "versions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.FlowVersion"
+                    }
+                }
+            }
+        },
+        "model.ExecutionLog": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "flow_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "node_results": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tree": {
+                    "type": "string"
+                },
+                "version_id": {
+                    "type": "integer"
+                },
+                "version_no": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.FlowDraft": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "flow_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tree": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.FlowSchedule": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "cron": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "flow_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "test_set_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.FlowVersion": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "flow_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "tree": {
+                    "type": "string"
+                },
+                "version_no": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.TestFlow": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "test_set_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.TestSet": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "host": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "owner_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.TestSetMember": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "test_set_id": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.TestUnit": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "import_id": {
+                    "type": "integer"
+                },
+                "method": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "params": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "request_body": {
+                    "type": "string"
+                },
+                "responses": {
+                    "type": "string"
+                },
+                "security": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "spec": {
+                    "type": "string"
+                },
+                "tag": {
+                    "type": "string"
+                },
+                "test_set_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.AgentResult": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.Event"
+                    }
+                },
+                "finished": {
+                    "type": "boolean"
+                },
+                "limit_reached": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "rounds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.Event": {
+            "type": "object",
+            "properties": {
+                "args": {},
+                "result": {},
+                "round": {
+                    "type": "integer"
+                },
+                "tool": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.ImportResult": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "importID": {
+                    "type": "integer"
+                },
+                "updated": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.PauseAnswer": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                },
+                "question_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.PauseQuestion": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "question": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "auth | sample | order | swagger",
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "登录后获得的会话令牌,请求时以 `Authorization: Bearer \u003ctoken\u003e` 形式携带。",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

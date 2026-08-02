@@ -1,0 +1,1986 @@
+basePath: /api
+definitions:
+  flow.Level:
+    enum:
+    - error
+    - warning
+    type: string
+    x-enum-varnames:
+    - LevelError
+    - LevelWarning
+  flow.Result:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/flow.ValidationError'
+        type: array
+      warnings:
+        items:
+          $ref: '#/definitions/flow.ValidationError'
+        type: array
+    type: object
+  flow.ValidationError:
+    properties:
+      code:
+        type: string
+      expected_format:
+        type: string
+      level:
+        $ref: '#/definitions/flow.Level'
+      message:
+        type: string
+      node_id:
+        type: string
+    type: object
+  httpapi.addMemberReq:
+    properties:
+      role:
+        type: string
+      user_id:
+        type: integer
+    type: object
+  httpapi.agentNewResp:
+    properties:
+      ok:
+        type: boolean
+      session_id:
+        type: integer
+    type: object
+  httpapi.agentResumeReq:
+    properties:
+      answers:
+        items:
+          $ref: '#/definitions/service.PauseAnswer'
+        type: array
+      provider_id:
+        type: integer
+    type: object
+  httpapi.agentSessionView:
+    properties:
+      messages:
+        items: {}
+        type: array
+      pending_questions:
+        items:
+          $ref: '#/definitions/service.PauseQuestion'
+        type: array
+      status:
+        type: string
+    type: object
+  httpapi.agentSubmitReq:
+    properties:
+      instruction:
+        type: string
+      mode:
+        description: edit | generate
+        type: string
+      provider_id:
+        type: integer
+      selected_nodes:
+        items:
+          type: string
+        type: array
+    type: object
+  httpapi.createFlowReq:
+    properties:
+      name:
+        type: string
+    type: object
+  httpapi.createScheduleReq:
+    properties:
+      cron:
+        type: string
+    type: object
+  httpapi.createTestSetReq:
+    properties:
+      host:
+        type: string
+      name:
+        type: string
+    type: object
+  httpapi.deletedResp:
+    properties:
+      deleted:
+        type: boolean
+    type: object
+  httpapi.draftView:
+    properties:
+      flow_id:
+        type: integer
+      name:
+        type: string
+      tree:
+        type: string
+    type: object
+  httpapi.errorResp:
+    properties:
+      error:
+        type: string
+    type: object
+  httpapi.flowListResp:
+    properties:
+      flows:
+        items:
+          $ref: '#/definitions/model.TestFlow'
+        type: array
+    type: object
+  httpapi.importConfirmResp:
+    properties:
+      error:
+        type: string
+      issues:
+        items:
+          type: string
+        type: array
+      need_confirmation:
+        type: boolean
+    type: object
+  httpapi.importReq:
+    properties:
+      confirm:
+        type: boolean
+      content:
+        type: object
+      source:
+        type: string
+    type: object
+  httpapi.loginResp:
+    properties:
+      id:
+        type: integer
+      token:
+        type: string
+      username:
+        type: string
+    type: object
+  httpapi.okResp:
+    properties:
+      ok:
+        type: boolean
+    type: object
+  httpapi.providerListResp:
+    properties:
+      providers:
+        items:
+          $ref: '#/definitions/httpapi.providerView'
+        type: array
+    type: object
+  httpapi.providerReq:
+    properties:
+      api_key:
+        type: string
+      base_url:
+        type: string
+      enabled:
+        type: boolean
+      model:
+        type: string
+      name:
+        type: string
+    type: object
+  httpapi.providerTestResp:
+    properties:
+      error:
+        type: string
+      ok:
+        type: boolean
+    type: object
+  httpapi.providerView:
+    properties:
+      base_url:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: integer
+      model:
+        type: string
+      name:
+        type: string
+    type: object
+  httpapi.registerReq:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  httpapi.registerResp:
+    properties:
+      id:
+        type: integer
+      username:
+        type: string
+    type: object
+  httpapi.runListResp:
+    properties:
+      runs:
+        items:
+          $ref: '#/definitions/model.ExecutionLog'
+        type: array
+    type: object
+  httpapi.scheduleListResp:
+    properties:
+      schedules:
+        items:
+          $ref: '#/definitions/model.FlowSchedule'
+        type: array
+    type: object
+  httpapi.setScheduleEnabledReq:
+    properties:
+      enabled:
+        type: boolean
+    type: object
+  httpapi.testSetListResp:
+    properties:
+      test_sets:
+        items:
+          $ref: '#/definitions/model.TestSet'
+        type: array
+    type: object
+  httpapi.unitBrief:
+    properties:
+      id:
+        type: integer
+      method:
+        type: string
+      name:
+        type: string
+      path:
+        type: string
+      security:
+        type: string
+      slug:
+        type: string
+      tag:
+        type: string
+    type: object
+  httpapi.unitBriefListResp:
+    properties:
+      units:
+        items:
+          $ref: '#/definitions/httpapi.unitBrief'
+        type: array
+    type: object
+  httpapi.unitListResp:
+    properties:
+      units:
+        items:
+          $ref: '#/definitions/model.TestUnit'
+        type: array
+    type: object
+  httpapi.updateDraftReq:
+    properties:
+      name:
+        type: string
+      tree: {}
+    type: object
+  httpapi.updateTestSetReq:
+    properties:
+      host:
+        type: string
+      name:
+        type: string
+    type: object
+  httpapi.versionListResp:
+    properties:
+      versions:
+        items:
+          $ref: '#/definitions/model.FlowVersion'
+        type: array
+    type: object
+  model.ExecutionLog:
+    properties:
+      created_at:
+        type: string
+      finished_at:
+        type: string
+      flow_id:
+        type: integer
+      id:
+        type: integer
+      node_results:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      tree:
+        type: string
+      version_id:
+        type: integer
+      version_no:
+        type: integer
+    type: object
+  model.FlowDraft:
+    properties:
+      created_at:
+        type: string
+      flow_id:
+        type: integer
+      id:
+        type: integer
+      name:
+        type: string
+      tree:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.FlowSchedule:
+    properties:
+      created_at:
+        type: string
+      cron:
+        type: string
+      enabled:
+        type: boolean
+      flow_id:
+        type: integer
+      id:
+        type: integer
+      job_id:
+        type: string
+      test_set_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  model.FlowVersion:
+    properties:
+      created_at:
+        type: string
+      created_by:
+        type: integer
+      enabled:
+        type: boolean
+      flow_id:
+        type: integer
+      id:
+        type: integer
+      tree:
+        type: string
+      version_no:
+        type: integer
+    type: object
+  model.TestFlow:
+    properties:
+      created_at:
+        type: string
+      created_by:
+        type: integer
+      id:
+        type: integer
+      name:
+        type: string
+      test_set_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  model.TestSet:
+    properties:
+      created_at:
+        type: string
+      host:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      owner_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  model.TestSetMember:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      role:
+        type: string
+      test_set_id:
+        type: integer
+      user_id:
+        type: integer
+    type: object
+  model.TestUnit:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        type: string
+      id:
+        type: integer
+      import_id:
+        type: integer
+      method:
+        type: string
+      name:
+        type: string
+      params:
+        type: string
+      path:
+        type: string
+      request_body:
+        type: string
+      responses:
+        type: string
+      security:
+        type: string
+      slug:
+        type: string
+      spec:
+        type: string
+      tag:
+        type: string
+      test_set_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  service.AgentResult:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/service.Event'
+        type: array
+      finished:
+        type: boolean
+      limit_reached:
+        type: boolean
+      message:
+        type: string
+      rounds:
+        type: integer
+    type: object
+  service.Event:
+    properties:
+      args: {}
+      result: {}
+      round:
+        type: integer
+      tool:
+        type: string
+    type: object
+  service.ImportResult:
+    properties:
+      created:
+        type: integer
+      importID:
+        type: integer
+      updated:
+        type: integer
+    type: object
+  service.PauseAnswer:
+    properties:
+      answer:
+        type: string
+      question_id:
+        type: string
+    type: object
+  service.PauseQuestion:
+    properties:
+      id:
+        type: string
+      options:
+        items:
+          type: string
+        type: array
+      question:
+        type: string
+      type:
+        description: auth | sample | order | swagger
+        type: string
+    type: object
+info:
+  contact: {}
+  description: '鉴枢(kianshu) — AI 驱动的集成测试平台 REST API。除注册、登录外,所有接口均需携带会话令牌:`Authorization:
+    Bearer <token>`(token 由登录接口返回)。权限模型:owner 完全控制;成员角色 read(只读)/ edit(可编辑)。'
+  title: 鉴枢 kianshu API
+  version: 1.0.0
+paths:
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: '校验用户名与密码,成功后签发会话令牌。令牌需在后续请求中通过 `Authorization: Bearer <token>`
+        携带。'
+      parameters:
+      - description: 登录凭据
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.registerReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 登录成功,返回 token
+          schema:
+            $ref: '#/definitions/httpapi.loginResp'
+        "400":
+          description: 请求体不合法
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "401":
+          description: 用户名或密码错误
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      summary: 用户登录
+      tags:
+      - 认证
+  /auth/logout:
+    post:
+      description: 使当前会话令牌立即失效。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 已退出
+          schema:
+            $ref: '#/definitions/httpapi.okResp'
+      security:
+      - BearerAuth: []
+      summary: 退出登录
+      tags:
+      - 认证
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: 使用用户名与密码注册新账号。用户名至少 3 字符,密码至少 6 字符,用户名全局唯一。
+      parameters:
+      - description: 注册信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.registerReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 注册成功
+          schema:
+            $ref: '#/definitions/httpapi.registerResp'
+        "400":
+          description: 参数不合法 / 用户名已存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 服务端错误
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      summary: 注册账号
+      tags:
+      - 认证
+  /flow/flows/{flowID}/agent/new:
+    post:
+      description: 清空流的 LLM 会话历史,开启全新会话。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 新会话 ID
+          schema:
+            $ref: '#/definitions/httpapi.agentNewResp'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 重置会话失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 重置 Agent 会话
+      tags:
+      - LLM Agent
+  /flow/flows/{flowID}/agent/resume:
+    post:
+      consumes:
+      - application/json
+      description: 当生成流程在冲突/暂停点停下时,提交对暂停问题的回答以继续。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: provider_id 与 answers 必填
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.agentResumeReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 恢复执行结果
+          schema:
+            $ref: '#/definitions/service.AgentResult'
+        "400":
+          description: 参数不合法 / Provider 未启用
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: Provider 不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "409":
+          description: 该流已有正在进行的提交
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 继续生成失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 恢复 Agent 生成(回答暂停问题)
+      tags:
+      - LLM Agent
+  /flow/flows/{flowID}/agent/session:
+    get:
+      description: 返回流的 LLM 会话状态:status(active/paused)、历史消息与待回答的暂停问题。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 会话状态
+          schema:
+            $ref: '#/definitions/httpapi.agentSessionView'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 读取会话失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 获取 Agent 会话
+      tags:
+      - LLM Agent
+  /flow/flows/{flowID}/agent/submit:
+    post:
+      consumes:
+      - application/json
+      description: 向 LLM Agent 提交一次指令,按需生成或编辑测试流。请求头 Accept 含 text/event-stream 时以
+        SSE 逐轮推送工具事件,否则返回聚合结果。mode 为 edit(默认)或 generate。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 提交内容(provider_id 与 instruction 必填)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.agentSubmitReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Agent 执行结果(events 为各轮工具事件)
+          schema:
+            $ref: '#/definitions/service.AgentResult'
+        "400":
+          description: 参数不合法 / Provider 未启用
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: Provider 或流不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "409":
+          description: 该流已有正在进行的提交
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 执行失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 提交 LLM Agent 指令(生成/编辑)
+      tags:
+      - LLM Agent
+  /flow/flows/{flowID}/draft:
+    get:
+      description: 返回流的可编辑草稿,tree 为整棵执行树快照(JSON 字符串)。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 草稿内容
+          schema:
+            $ref: '#/definitions/httpapi.draftView'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 草稿不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 获取流草稿
+      tags:
+      - 测试流
+    put:
+      consumes:
+      - application/json
+      description: 保存流的可编辑草稿。tree 可为内联 JSON 对象或 JSON 编码字符串。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 草稿内容(必须包含 tree)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.updateDraftReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 保存后的草稿记录
+          schema:
+            $ref: '#/definitions/model.FlowDraft'
+        "400":
+          description: 请求体不合法 / tree 格式不合法 / 校验失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 保存草稿失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 更新流草稿
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/draft/trial-run:
+    post:
+      description: 对当前草稿执行一次试运行,返回执行日志(含各节点结果)。不生成版本。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 执行日志
+          schema:
+            $ref: '#/definitions/model.ExecutionLog'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 试运行失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 草稿试运行
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/draft/validate:
+    post:
+      description: 对当前草稿执行全树校验(单根、无环、I/O 契约、JSONata 语法、try/catch 配对、loop 输入、缓存键静态可见、软删单元告警)。返回
+        errors 与 warnings 两类发现。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 校验结果(errors / warnings)
+          schema:
+            $ref: '#/definitions/flow.Result'
+        "400":
+          description: 无效的流 ID / 草稿解析失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 草稿不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 校验流草稿
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/runs:
+    get:
+      description: 返回流的全部执行日志记录。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 执行日志列表
+          schema:
+            $ref: '#/definitions/httpapi.runListResp'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 查询执行日志失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 列出执行日志
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/runs/{runID}:
+    get:
+      description: 返回单条执行日志(含关联版本快照与各节点结果),可用于复原。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 执行日志 ID
+        in: path
+        name: runID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 执行日志
+          schema:
+            $ref: '#/definitions/model.ExecutionLog'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 执行日志不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 读取执行日志失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 获取执行日志
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/schedules:
+    get:
+      description: 返回流的全部 cron 调度任务。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 调度任务列表
+          schema:
+            $ref: '#/definitions/httpapi.scheduleListResp'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 查询失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 列出定时调度
+      tags:
+      - 定时调度
+    post:
+      consumes:
+      - application/json
+      description: 为流注册一个 cron 表达式调度,创建后即启用。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: cron 表达式
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.createScheduleReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建的调度任务
+          schema:
+            $ref: '#/definitions/model.FlowSchedule'
+        "400":
+          description: cron 表达式不能为空 / 无效
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 创建失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 创建定时调度
+      tags:
+      - 定时调度
+  /flow/flows/{flowID}/schedules/{scheduleID}:
+    delete:
+      description: 删除指定调度任务,不再触发。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 调度任务 ID
+        in: path
+        name: scheduleID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 已删除
+          schema:
+            $ref: '#/definitions/httpapi.deletedResp'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 调度任务不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 删除失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 删除定时调度
+      tags:
+      - 定时调度
+    patch:
+      consumes:
+      - application/json
+      description: 修改指定调度任务的 cron 表达式。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 调度任务 ID
+        in: path
+        name: scheduleID
+        required: true
+        type: integer
+      - description: 新的 cron 表达式
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.createScheduleReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的调度任务
+          schema:
+            $ref: '#/definitions/model.FlowSchedule'
+        "400":
+          description: 无效的 ID / cron 表达式无效
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 调度任务不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 更新失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 更新定时调度
+      tags:
+      - 定时调度
+  /flow/flows/{flowID}/schedules/{scheduleID}/enabled:
+    patch:
+      consumes:
+      - application/json
+      description: 设置调度任务是否触发(暂停/恢复)。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 调度任务 ID
+        in: path
+        name: scheduleID
+        required: true
+        type: integer
+      - description: 是否启用
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.setScheduleEnabledReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的调度任务
+          schema:
+            $ref: '#/definitions/model.FlowSchedule'
+        "400":
+          description: 无效的 ID / 请求体不合法
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 调度任务不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 更新失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 启停定时调度
+      tags:
+      - 定时调度
+  /flow/flows/{flowID}/versions:
+    get:
+      description: 返回流的所有不可变版本快照。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 版本列表
+          schema:
+            $ref: '#/definitions/httpapi.versionListResp'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 查询版本失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 列出流版本
+      tags:
+      - 测试流
+    post:
+      description: 将当前草稿固化为不可变版本并设为启用。校验失败时返回 422 及校验详情。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 固化的版本快照
+          schema:
+            $ref: '#/definitions/model.FlowVersion'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "422":
+          description: 流校验失败(含 validation 详情)
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 保存启用失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 保存并启用版本
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/versions/{versionNo}:
+    get:
+      description: 按版本号返回指定版本的自包含快照,可用于精确复原。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 版本号
+        in: path
+        name: versionNo
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 版本快照
+          schema:
+            $ref: '#/definitions/model.FlowVersion'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 版本不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 读取版本失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 获取流版本
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/versions/{versionNo}/run:
+    post:
+      description: 执行指定版本的快照并写入执行日志。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 版本号
+        in: path
+        name: versionNo
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 执行日志
+          schema:
+            $ref: '#/definitions/model.ExecutionLog'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 版本不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 执行版本失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 执行流版本
+      tags:
+      - 测试流
+  /providers:
+    get:
+      description: 返回当前用户配置的全部 LLM Provider,响应中不包含 API 密钥。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Provider 列表
+          schema:
+            $ref: '#/definitions/httpapi.providerListResp'
+      security:
+      - BearerAuth: []
+      summary: 列出 LLM Provider
+      tags:
+      - LLM Provider
+    post:
+      consumes:
+      - application/json
+      description: 创建兼容 OpenAI 协议的 LLM Provider。name 与 base_url 必填;api_key 会被加密存储,响应不回显。默认启用。
+      parameters:
+      - description: Provider 配置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.providerReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建的 Provider(不含 api_key)
+          schema:
+            $ref: '#/definitions/httpapi.providerView'
+        "400":
+          description: name 与 base_url 必填
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 密钥加密失败 / 创建失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 创建 LLM Provider
+      tags:
+      - LLM Provider
+  /providers/{id}:
+    delete:
+      description: 删除指定 Provider 配置。
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 已删除
+          schema:
+            $ref: '#/definitions/httpapi.okResp'
+        "400":
+          description: 无效的 Provider ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: Provider 不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 删除 LLM Provider
+      tags:
+      - LLM Provider
+    get:
+      description: 返回指定 Provider 的配置(不含 API 密钥)。
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Provider 配置
+          schema:
+            $ref: '#/definitions/httpapi.providerView'
+        "400":
+          description: 无效的 Provider ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: Provider 不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 获取 LLM Provider
+      tags:
+      - LLM Provider
+    patch:
+      consumes:
+      - application/json
+      description: 更新 Provider 的字段,仅更新传入字段。api_key 传入时重新加密存储。
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 更新内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.providerReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的 Provider
+          schema:
+            $ref: '#/definitions/httpapi.providerView'
+        "400":
+          description: 无效的 ID / 请求体不合法
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: Provider 不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 更新失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 更新 LLM Provider
+      tags:
+      - LLM Provider
+  /providers/{id}/test:
+    post:
+      description: 使用配置的 base_url / api_key / model 发起一次连通性测试。ok=false 时 error 字段给出原因。
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试结果(ok 为是否连通,失败时含 error)
+          schema:
+            $ref: '#/definitions/httpapi.providerTestResp'
+        "400":
+          description: 无效的 Provider ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: Provider 不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 密钥解密失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 测试 Provider 连通性
+      tags:
+      - LLM Provider
+  /test-sets:
+    get:
+      description: 返回当前用户拥有或作为成员参与的所有测试集。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试集列表
+          schema:
+            $ref: '#/definitions/httpapi.testSetListResp'
+      security:
+      - BearerAuth: []
+      summary: 列出测试集
+      tags:
+      - 测试集
+    post:
+      consumes:
+      - application/json
+      description: 创建一个新测试集,创建者即为 owner(完全权限)。host 为单一环境地址,可选。
+      parameters:
+      - description: 测试集信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.createTestSetReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建成功
+          schema:
+            $ref: '#/definitions/model.TestSet'
+        "400":
+          description: 名称不能为空
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 创建失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 创建测试集
+      tags:
+      - 测试集
+  /test-sets/{id}:
+    get:
+      description: 需要对该测试集具备读权限(owner / read / edit)。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试集详情
+          schema:
+            $ref: '#/definitions/model.TestSet'
+        "400":
+          description: 无效的测试集 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该测试集
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 测试集不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 获取测试集详情
+      tags:
+      - 测试集
+    patch:
+      consumes:
+      - application/json
+      description: 更新名称或 host,字段可省略(仅更新传入字段)。需要 edit 或 owner 权限。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 更新内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.updateTestSetReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的测试集
+          schema:
+            $ref: '#/definitions/model.TestSet'
+        "400":
+          description: 无效的 ID / 请求体不合法 / 无更新内容
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 测试集不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 更新测试集
+      tags:
+      - 测试集
+  /test-sets/{id}/flows:
+    get:
+      description: 返回测试集内的所有测试流(仅元信息,执行树在草稿/版本中)。需要读权限。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试流列表
+          schema:
+            $ref: '#/definitions/httpapi.flowListResp'
+        "400":
+          description: 无效的测试集 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该测试集
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 查询失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 列出测试流
+      tags:
+      - 测试流
+    post:
+      consumes:
+      - application/json
+      description: 在测试集内创建一个测试流。需要编辑权限。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 流名称
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.createFlowReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建的测试流
+          schema:
+            $ref: '#/definitions/model.TestFlow'
+        "400":
+          description: 名称不能为空 / 无效的测试集 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 创建失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 创建测试流
+      tags:
+      - 测试流
+  /test-sets/{id}/imports:
+    post:
+      consumes:
+      - application/json
+      description: 将 Swagger 2.0 / OpenAPI 3.x 文档导入测试集,按 method+path 去重生成/更新测试单元。content
+        可为 swagger JSON 对象或 JSON 字符串;source 为来源标识(可选)。若文档非标准且 confirm 为 false,返回 422
+        需用户确认。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 导入内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.importReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 导入成功(created/updated 为新增与更新数量)
+          schema:
+            $ref: '#/definitions/service.ImportResult'
+        "400":
+          description: content 不合法 / 文档无法解析导入
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "422":
+          description: 文档非标准,需 confirm=true 后重试
+          schema:
+            $ref: '#/definitions/httpapi.importConfirmResp'
+        "500":
+          description: 导入失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 导入 Swagger
+      tags:
+      - 测试单元
+  /test-sets/{id}/members:
+    post:
+      consumes:
+      - application/json
+      description: 为测试集添加成员并指定角色(read|edit)。已存在则更新角色。仅 owner 可管理成员。不能把自己加为成员。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 成员信息(user_id 与角色 read/edit)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.addMemberReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成员记录
+          schema:
+            $ref: '#/definitions/model.TestSetMember'
+        "400":
+          description: 无效的 ID / 角色不合法 / 目标用户不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 仅 owner 可管理成员
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 服务端错误
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 添加/更新成员
+      tags:
+      - 测试集
+  /test-sets/{id}/members/{userID}:
+    delete:
+      description: 将指定用户从测试集成员中移除。仅 owner 可管理成员。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 要移除的用户 ID
+        in: path
+        name: userID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 已移除
+          schema:
+            $ref: '#/definitions/httpapi.okResp'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 仅 owner 可管理成员
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 移除成员
+      tags:
+      - 测试集
+  /test-sets/{id}/units:
+    get:
+      description: 按测试集列出测试单元,支持 tag / method / 关键字(q,匹配 name、path、slug)过滤;include_deleted=true
+        时包含已软删单元。需要读权限。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 按 tag 过滤
+        in: query
+        name: tag
+        type: string
+      - description: 按请求方法过滤(GET/POST/...)
+        in: query
+        name: method
+        type: string
+      - description: 关键字,匹配名称/路径/slug
+        in: query
+        name: q
+        type: string
+      - description: 是否包含已软删单元,默认 false
+        in: query
+        name: include_deleted
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试单元列表
+          schema:
+            $ref: '#/definitions/httpapi.unitListResp'
+        "400":
+          description: 无效的测试集 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该测试集
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 查询失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 查询测试单元
+      tags:
+      - 测试单元
+  /test-sets/{id}/units/{unitID}:
+    delete:
+      description: 软删除指定测试单元;历史版本引用的接口信息不受影响。需要编辑权限。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 测试单元 ID
+        in: path
+        name: unitID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 已删除
+          schema:
+            $ref: '#/definitions/httpapi.okResp'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 单元不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 删除测试单元(软删)
+      tags:
+      - 测试单元
+    get:
+      description: 返回单个测试单元的完整信息(含请求/响应/安全契约的原始 JSON)。需要读权限。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 测试单元 ID
+        in: path
+        name: unitID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试单元
+          schema:
+            $ref: '#/definitions/model.TestUnit'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该测试集
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 单元不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 获取测试单元
+      tags:
+      - 测试单元
+  /test-sets/{id}/units/tool-list:
+    get:
+      description: 供 LLM agent 工具使用的精简单元列表,最多 500 条,不含软删单元。支持 tag / 关键字 q 过滤。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 按 tag 过滤
+        in: query
+        name: tag
+        type: string
+      - description: 关键字,匹配名称/路径/slug
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 精简单元列表
+          schema:
+            $ref: '#/definitions/httpapi.unitBriefListResp'
+        "400":
+          description: 无效的测试集 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该测试集
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 查询失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 查询测试单元(工具精简版)
+      tags:
+      - 测试单元
+securityDefinitions:
+  BearerAuth:
+    description: '登录后获得的会话令牌,请求时以 `Authorization: Bearer <token>` 形式携带。'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
