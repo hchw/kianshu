@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FlowTree, FlowNode, IOKey } from '../../api/flow'
 import { NODE_LABELS } from '../../lib/tree'
+import { getUnit, type TestUnit } from '../../api/testset'
 
 interface Props {
   tree: FlowTree
@@ -8,13 +9,15 @@ interface Props {
   onTreeChange: (t: FlowTree) => void
   onSaved: () => void
   onClose: () => void
+  testSetID: number
 }
 
-export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onClose }: Props) {
+export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onClose, testSetID }: Props) {
   const node: FlowNode | undefined = tree.nodes[nodeID]
   const [config, setConfig] = useState<Record<string, unknown>>({})
   const [inputs, setInputs] = useState<Record<string, string>>({})
   const [outputs, setOutputs] = useState<Record<string, string>>({})
+  const [unit, setUnit] = useState<TestUnit | null>(null)
 
   useEffect(() => {
     if (!node) return
@@ -25,7 +28,17 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onClose
     const outs: Record<string, string> = {}
     for (const [k, v] of Object.entries(node.outputs ?? {})) outs[k] = v.desc ?? ''
     setOutputs(outs)
-  }, [nodeID, node])
+
+    const unitID = Number(node.config && typeof node.config === 'object' ? (node.config as Record<string, unknown>).unit_id ?? 0 : 0)
+    if (node.type === 'api' && testSetID && unitID) {
+      setUnit(null)
+      getUnit(testSetID, unitID)
+        .then(setUnit)
+        .catch(() => setUnit(null))
+    } else {
+      setUnit(null)
+    }
+  }, [nodeID, node, testSetID])
 
   if (!node) return null
 
@@ -64,6 +77,37 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onClose
                 onChange={(e) => setKV('unit_id', Number(e.target.value))}
               />
             </label>
+            {unit && (
+              <div className="card sub mono small">
+                <div className="strong">{unit.method} {unit.path}</div>
+                <div className="muted">slug: {unit.slug}</div>
+                {unit.name && <div className="muted">{unit.name}</div>}
+                {unit.params && unit.params !== 'null' && (
+                  <details>
+                    <summary>参数 (params)</summary>
+                    <pre>{tryPretty(unit.params)}</pre>
+                  </details>
+                )}
+                {unit.request_body && unit.request_body !== 'null' && (
+                  <details>
+                    <summary>请求体 (request_body)</summary>
+                    <pre>{tryPretty(unit.request_body)}</pre>
+                  </details>
+                )}
+                {unit.responses && unit.responses !== 'null' && (
+                  <details>
+                    <summary>响应 (responses)</summary>
+                    <pre>{tryPretty(unit.responses)}</pre>
+                  </details>
+                )}
+                {unit.security && unit.security !== 'null' && (
+                  <details>
+                    <summary>安全 (security)</summary>
+                    <pre>{tryPretty(unit.security)}</pre>
+                  </details>
+                )}
+              </div>
+            )}
             <label>
               params (JSON)
               <textarea
@@ -204,4 +248,12 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onClose
       </div>
     </div>
   )
+}
+
+function tryPretty(s: string): string {
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2)
+  } catch {
+    return s
+  }
 }

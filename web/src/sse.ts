@@ -61,11 +61,25 @@ export function openSSE(
 }
 
 function handleFrame(frame: string, h: SSESessionHandlers) {
+  let eventType = ''
   for (const line of frame.split('\n')) {
+    if (line.startsWith('event: ')) {
+      eventType = line.slice(7).trim()
+      continue
+    }
     if (!line.startsWith('data: ')) continue
     const payload = line.slice(6)
     if (payload === '[DONE]') {
       h.onDone()
+      continue
+    }
+    if (eventType === 'error') {
+      try {
+        h.onError(JSON.parse(payload))
+      } catch {
+        h.onError(payload)
+      }
+      eventType = ''
       continue
     }
     try {
@@ -73,6 +87,7 @@ function handleFrame(frame: string, h: SSESessionHandlers) {
     } catch {
       // non-JSON data frame; ignore
     }
+    eventType = ''
   }
 }
 

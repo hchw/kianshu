@@ -10,9 +10,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type registerReq struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+type RegisterReq struct {
+	Username string `json:"username" validate:"required" minLength:"3" example:"testuser"`
+	Password string `json:"password" validate:"required" minLength:"6" example:"123456"`
 }
 
 // handleRegister creates a new platform account.
@@ -22,13 +22,13 @@ type registerReq struct {
 //	@Tags		认证
 //	@Accept		json
 //	@Produce	json
-//	@Param		body	body		registerReq	true	"注册信息"
+//	@Param		body	body		RegisterReq	true	"注册信息"
 //	@Success	201		{object}	registerResp	"注册成功"
 //	@Failure	400		{object}	errorResp	"参数不合法 / 用户名已存在"
 //	@Failure	500		{object}	errorResp	"服务端错误"
 //	@Router		/auth/register [post]
 func (s *Server) handleRegister(c *gin.Context) {
-	var req registerReq
+	var req RegisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeErr(c, http.StatusBadRequest, "请求体不合法")
 		return
@@ -64,13 +64,13 @@ func (s *Server) handleRegister(c *gin.Context) {
 //	@Tags		认证
 //	@Accept		json
 //	@Produce	json
-//	@Param		body	body		registerReq	true	"登录凭据"
+//	@Param		body	body		RegisterReq	true	"登录凭据"
 //	@Success	200		{object}	loginResp	"登录成功,返回 token"
 //	@Failure	400		{object}	errorResp	"请求体不合法"
 //	@Failure	401		{object}	errorResp	"用户名或密码错误"
 //	@Router		/auth/login [post]
 func (s *Server) handleLogin(c *gin.Context) {
-	var req registerReq
+	var req RegisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeErr(c, http.StatusBadRequest, "请求体不合法")
 		return

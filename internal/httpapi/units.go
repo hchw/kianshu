@@ -13,9 +13,9 @@ import (
 )
 
 type importReq struct {
-	Source  string          `json:"source"`
-	Content json.RawMessage `json:"content" swaggertype:"object"`
-	Confirm bool            `json:"confirm"`
+	Source  string          `json:"source" example:"my-api"`
+	Content json.RawMessage `json:"content" swaggertype:"object" validate:"required"`
+	Confirm bool            `json:"confirm" example:"true"`
 }
 
 // handleImport imports a swagger document into a test set, deriving test units.

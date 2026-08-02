@@ -12,18 +12,19 @@ import (
 	"github/hchw/kianshu/internal/service"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 )
 
 type agentSubmitReq struct {
-	ProviderID    uint     `json:"provider_id"`
-	Instruction   string   `json:"instruction"`
-	SelectedNodes []string `json:"selected_nodes,omitempty"`
-	Mode          string   `json:"mode"` // edit | generate
+	ProviderID    uint     `json:"provider_id" validate:"required" example:"1"`
+	Instruction   string   `json:"instruction" validate:"required" minLength:"1" example:"请为用户登录接口生成测试流"`
+	SelectedNodes []string `json:"selected_nodes,omitempty" example:"[\"get-users-{id}\"]"`
+	Mode          string   `json:"mode" enum:"edit,generate" example:"edit"`
 }
 
 type agentResumeReq struct {
-	ProviderID uint                `json:"provider_id"`
-	Answers    []service.PauseAnswer `json:"answers"`
+	ProviderID uint                  `json:"provider_id" validate:"required" example:"1"`
+	Answers    []service.PauseAnswer `json:"answers" validate:"required"`
 }
 
 // agentProvider loads and decrypts the user's LLM provider for an agent run.
@@ -180,9 +181,10 @@ func (s *Server) submitSSE(c *gin.Context, flowID uint, req agentSubmitReq, prov
 			io.WriteString(w, "data: "+string(data)+"\n\n")
 			return true
 		case err := <-done:
-			if err != nil {
-				io.WriteString(w, "event: error\ndata: "+jsonString(err.Error())+"\n\n")
-			}
+				if err != nil {
+					log.Errorf("agent: submitSSE flow=%d 执行失败: %v", flowID, err)
+					io.WriteString(w, "event: error\ndata: "+jsonString(err.Error())+"\n\n")
+				}
 			io.WriteString(w, "data: [DONE]\n\n")
 			return false
 		}

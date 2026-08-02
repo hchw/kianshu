@@ -10,8 +10,8 @@ import (
 )
 
 type addMemberReq struct {
-	UserID uint   `json:"user_id"`
-	Role   string `json:"role"`
+	UserID uint   `json:"user_id" validate:"required" example:"2"`
+	Role   string `json:"role" validate:"required" enum:"read,edit" example:"edit"`
 }
 
 // handleAddMember adds or updates a member role on a test set.

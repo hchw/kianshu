@@ -43,8 +43,8 @@ func (s *Server) handleListTestSets(c *gin.Context) {
 }
 
 type createTestSetReq struct {
-	Name string `json:"name"`
-	Host string `json:"host"`
+	Name string `json:"name" validate:"required" minLength:"1" example:"我的测试集"`
+	Host string `json:"host" example:"https://api.example.com"`
 }
 
 // handleCreateTestSet creates a test set owned by the caller.
@@ -113,8 +113,8 @@ func (s *Server) handleGetTestSet(c *gin.Context) {
 }
 
 type updateTestSetReq struct {
-	Name *string `json:"name"`
-	Host *string `json:"host"`
+	Name *string `json:"name" example:"新名称"`
+	Host *string `json:"host" example:"https://new-api.example.com"`
 }
 
 // handleUpdateTestSet updates a test set the caller may edit.

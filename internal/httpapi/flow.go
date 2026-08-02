@@ -157,12 +157,13 @@ func (s *Server) handleGetDraft(c *gin.Context) {
 	if !ok {
 		return
 	}
+	ts, _ := s.flowTestSet(flowID)
 	d, err := service.GetDraft(s.DB, flowID)
 	if err != nil {
 		writeErr(c, http.StatusNotFound, "草稿不存在")
 		return
 	}
-	writeJSON(c, http.StatusOK, gin.H{"flow_id": flowID, "name": d.Name, "tree": d.Tree})
+	writeJSON(c, http.StatusOK, gin.H{"flow_id": flowID, "test_set_id": ts, "name": d.Name, "tree": d.Tree})
 }
 
 // handleUpdateDraft saves a flow's working draft. Each save creates a new

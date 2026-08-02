@@ -10,6 +10,7 @@ import (
 	"github/hchw/kianshu/internal/model"
 	"github/hchw/kianshu/internal/openai"
 
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -48,7 +49,7 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 			"若存在,先列出待确认问题(每行以 'Q: ' 开头);否则直接开始按固定顺序生成:启动→认证取token/写缓存→业务序列→断言→收尾。",
 		len(units), formatUnitBriefs(units), d.Tree, instruction)
 
-	// ② + ③ analyze + conflict detection via a single structured round.
+	// ② + ③ analyze + conflict detection via a tool-call-aware loop.
 	session, err := GetFlowSession(db, flowID, userID)
 	if err != nil {
 		return nil, err
@@ -57,6 +58,11 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 	if err != nil {
 		return nil, err
 	}
+	tree, err := flow.ParseTree(d.Tree)
+	if err != nil {
+		return nil, err
+	}
+	toolCtx := &ToolContext{DB: db, TestSetID: tsID, Tree: tree}
 	req := openai.CompletionRequest{
 		Model:    provider.GetModel(),
 		Messages: append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...),
@@ -64,12 +70,32 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 	}
 	req.Messages = append(req.Messages, openai.Message{Role: "user", Content: strPtr(contextMsg)})
 
-	resp, err := provider.ChatCompletion(ctx, provider, req)
-	if err != nil {
-		return nil, err
+	const maxAnalysisRounds = 5
+	var analysis openai.Message
+	for round := 1; round <= maxAnalysisRounds; round++ {
+		resp, err := provider.ChatCompletion(ctx, provider, req)
+		if err != nil {
+			log.Errorf("agent: generate flow=%d analysis round=%d LLM 调用失败: %v", flowID, round, err)
+			return nil, err
+		}
+		analysis = resp.Choices[0].Message
+		req.Messages = append(req.Messages, analysis)
+
+		if len(analysis.ToolCalls) == 0 {
+			break
+		}
+		log.Infof("agent: generate flow=%d analysis round=%d LLM 发起 %d 个工具调用", flowID, round, len(analysis.ToolCalls))
+		for _, tc := range analysis.ToolCalls {
+			log.Infof("agent: generate flow=%d analysis round=%d tool=%s args=%s", flowID, round, tc.Function.Name, tc.Function.Arguments)
+			result := ExecTool(toolCtx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+			log.Infof("agent: generate flow=%d analysis round=%d tool=%s 结果 ok=%v err=%s", flowID, round, tc.Function.Name, result.OK, result.Error)
+			req.Messages = append(req.Messages, openai.Message{
+				Role:       "tool",
+				ToolCallID: tc.ID,
+				Content:    strPtr(jsonString(result)),
+			})
+		}
 	}
-	analysis := resp.Choices[0].Message
-	req.Messages = append(req.Messages, analysis)
 
 	// ④ pause: merge LLM-raised Q: lines with code-level conflict detection.
 	// The code check compares each unit's swagger security declaration against

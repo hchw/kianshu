@@ -35,7 +35,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/httpapi.registerReq"
+                            "$ref": "#/definitions/httpapi.RegisterReq"
                         }
                     }
                 ],
@@ -106,7 +106,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/httpapi.registerReq"
+                            "$ref": "#/definitions/httpapi.RegisterReq"
                         }
                     }
                 ],
@@ -2359,14 +2359,39 @@ const docTemplate = `{
                 }
             }
         },
+        "httpapi.RegisterReq": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "minLength": 6,
+                    "example": "123456"
+                },
+                "username": {
+                    "type": "string",
+                    "minLength": 3,
+                    "example": "testuser"
+                }
+            }
+        },
         "httpapi.addMemberReq": {
             "type": "object",
+            "required": [
+                "role",
+                "user_id"
+            ],
             "properties": {
                 "role": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "edit"
                 },
                 "user_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 2
                 }
             }
         },
@@ -2374,15 +2399,21 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "ok": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 },
                 "session_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 }
             }
         },
         "httpapi.agentResumeReq": {
             "type": "object",
+            "required": [
+                "answers",
+                "provider_id"
+            ],
             "properties": {
                 "answers": {
                     "type": "array",
@@ -2391,7 +2422,8 @@ const docTemplate = `{
                     }
                 },
                 "provider_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 }
             }
         },
@@ -2409,55 +2441,82 @@ const docTemplate = `{
                     }
                 },
                 "status": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "active"
                 }
             }
         },
         "httpapi.agentSubmitReq": {
             "type": "object",
+            "required": [
+                "instruction",
+                "provider_id"
+            ],
             "properties": {
                 "instruction": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "example": "请为用户登录接口生成测试流"
                 },
                 "mode": {
-                    "description": "edit | generate",
-                    "type": "string"
+                    "type": "string",
+                    "example": "edit"
                 },
                 "provider_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "selected_nodes": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "example": [
+                        "[\"get-users-{id}\"]"
+                    ]
                 }
             }
         },
         "httpapi.createFlowReq": {
             "type": "object",
+            "required": [
+                "name"
+            ],
             "properties": {
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "example": "我的测试流"
                 }
             }
         },
         "httpapi.createScheduleReq": {
             "type": "object",
+            "required": [
+                "cron"
+            ],
             "properties": {
                 "cron": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "example": "0 */2 * * *"
                 }
             }
         },
         "httpapi.createTestSetReq": {
             "type": "object",
+            "required": [
+                "name"
+            ],
             "properties": {
                 "host": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "https://api.example.com"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "example": "我的测试集"
                 }
             }
         },
@@ -2465,7 +2524,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "deleted": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -2473,13 +2533,16 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "flow_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "我的测试流"
                 },
                 "tree": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "{\"root\":{}}"
                 }
             }
         },
@@ -2487,7 +2550,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "error": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "参数不合法"
                 }
             }
         },
@@ -2506,30 +2570,40 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "error": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "文档非标准"
                 },
                 "issues": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "example": [
+                        "[\"缺少 info.title\"]"
+                    ]
                 },
                 "need_confirmation": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
         "httpapi.importReq": {
             "type": "object",
+            "required": [
+                "content"
+            ],
             "properties": {
                 "confirm": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 },
                 "content": {
                     "type": "object"
                 },
                 "source": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "my-api"
                 }
             }
         },
@@ -2537,13 +2611,16 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "token": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "eyJhbGciOiJIUzI1NiIs..."
                 },
                 "username": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "testuser"
                 }
             }
         },
@@ -2551,7 +2628,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "ok": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -2568,21 +2646,33 @@ const docTemplate = `{
         },
         "httpapi.providerReq": {
             "type": "object",
+            "required": [
+                "base_url",
+                "name"
+            ],
             "properties": {
                 "api_key": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "sk-xxx"
                 },
                 "base_url": {
-                    "type": "string"
+                    "type": "string",
+                    "format": "uri",
+                    "minLength": 1,
+                    "example": "https://api.openai.com"
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 },
                 "model": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "gpt-4"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "example": "我的 OpenAI"
                 }
             }
         },
@@ -2590,10 +2680,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "error": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "连接超时"
                 },
                 "ok": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -2601,30 +2693,24 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "base_url": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "https://api.openai.com"
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "model": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "gpt-4"
                 },
                 "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "httpapi.registerReq": {
-            "type": "object",
-            "properties": {
-                "password": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "我的 OpenAI"
                 }
             }
         },
@@ -2632,10 +2718,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "username": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "testuser"
                 }
             }
         },
@@ -2665,7 +2753,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -2684,25 +2773,32 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "method": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "GET"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "获取用户"
                 },
                 "path": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "/users/{id}"
                 },
                 "security": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "[{\"BearerAuth\":[]}]"
                 },
                 "slug": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "get-users-{id}"
                 },
                 "tag": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "用户"
                 }
             }
         },
@@ -2730,9 +2826,13 @@ const docTemplate = `{
         },
         "httpapi.updateDraftReq": {
             "type": "object",
+            "required": [
+                "tree"
+            ],
             "properties": {
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "我的测试流"
                 },
                 "tree": {}
             }
@@ -2741,10 +2841,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "host": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "https://new-api.example.com"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "新名称"
                 }
             }
         },
@@ -2769,10 +2871,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "flow_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "node_results": {
                     "type": "string"
@@ -2781,16 +2885,19 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "success"
                 },
                 "tree": {
                     "type": "string"
                 },
                 "version_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "version_no": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 }
             }
         },
@@ -2801,13 +2908,16 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "flow_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "我的测试流"
                 },
                 "tree": {
                     "type": "string"
@@ -2824,22 +2934,28 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "cron": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "0 */2 * * *"
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 },
                 "flow_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "job_id": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "job_abc123"
                 },
                 "test_set_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "updated_at": {
                     "type": "string"
@@ -2853,22 +2969,27 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "created_by": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 },
                 "flow_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "tree": {
                     "type": "string"
                 },
                 "version_no": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 }
             }
         },
@@ -2879,16 +3000,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "created_by": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "我的测试流"
                 },
                 "test_set_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "updated_at": {
                     "type": "string"
@@ -2902,16 +3027,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "host": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "https://api.example.com"
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "我的测试集"
                 },
                 "owner_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "updated_at": {
                     "type": "string"
@@ -2925,16 +3054,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "role": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "edit"
                 },
                 "test_set_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "user_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 2
                 }
             }
         },
@@ -2948,22 +3081,27 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "import_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "method": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "GET"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "获取用户"
                 },
                 "params": {
                     "type": "string"
                 },
                 "path": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "/users/{id}"
                 },
                 "request_body": {
                     "type": "string"
@@ -2975,16 +3113,19 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "slug": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "get-users-{id}"
                 },
                 "spec": {
                     "type": "string"
                 },
                 "tag": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "用户"
                 },
                 "test_set_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1
                 },
                 "updated_at": {
                     "type": "string"

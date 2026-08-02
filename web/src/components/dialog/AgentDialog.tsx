@@ -76,6 +76,8 @@ export default function AgentDialog({ flowID, providers, tree, onChanged }: Prop
     setErr('')
     setBusy(true)
     setEvents([])
+    setMessages((cur) => [...cur, { role: 'user', content: instruction.trim() }])
+    scrollBottom()
     const body = {
       provider_id: providerID,
       instruction: instruction.trim(),

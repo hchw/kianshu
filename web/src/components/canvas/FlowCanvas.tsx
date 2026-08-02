@@ -11,6 +11,7 @@ interface Props {
   onSelect: (id: string | null) => void
   onTreeChange: (t: FlowTree) => void
   onSaved: () => void
+  testSetID: number
 }
 
 const COLORS: Record<string, string> = {
@@ -24,7 +25,7 @@ const COLORS: Record<string, string> = {
   adapter: '#319795',
 }
 
-export default function FlowCanvas({ tree, selected, onSelect, onTreeChange, onSaved }: Props) {
+export default function FlowCanvas({ tree, selected, onSelect, onTreeChange, onSaved, testSetID }: Props) {
   const { positions, ordered } = useMemo(() => layoutTree(tree), [tree])
 
   const nodes: Node[] = ordered.map((id) => {
@@ -126,6 +127,7 @@ export default function FlowCanvas({ tree, selected, onSelect, onTreeChange, onS
           onTreeChange={onTreeChange}
           onSaved={onSaved}
           onClose={() => onSelect(null)}
+          testSetID={testSetID}
         />
       )}
     </div>

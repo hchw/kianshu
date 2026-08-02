@@ -10,20 +10,20 @@ import (
 )
 
 type providerReq struct {
-	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
-	Model   string `json:"model"`
-	Enabled *bool  `json:"enabled"`
+	Name    string `json:"name" validate:"required" minLength:"1" example:"我的 OpenAI"`
+	BaseURL string `json:"base_url" validate:"required" minLength:"1" format:"uri" example:"https://api.openai.com"`
+	APIKey  string `json:"api_key" example:"sk-xxx"`
+	Model   string `json:"model" example:"gpt-4"`
+	Enabled *bool  `json:"enabled" example:"true"`
 }
 
 // providerView strips sensitive fields for responses.
 type providerView struct {
-	ID      uint   `json:"id"`
-	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
-	Model   string `json:"model"`
-	Enabled bool   `json:"enabled"`
+	ID      uint   `json:"id" example:"1"`
+	Name    string `json:"name" example:"我的 OpenAI"`
+	BaseURL string `json:"base_url" example:"https://api.openai.com"`
+	Model   string `json:"model" example:"gpt-4"`
+	Enabled bool   `json:"enabled" example:"true"`
 }
 
 func toView(p model.Provider) providerView {

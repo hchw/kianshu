@@ -15,8 +15,14 @@ export interface TestUnit {
   slug: string
   tag: string
   name: string
+  params: string
+  request_body: string
+  responses: string
   security: string
+  spec: string
   deleted_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface FlowSummary {
@@ -69,6 +75,11 @@ export async function listUnits(testSetID: number, filter?: { tag?: string; q?: 
 
 export async function deleteUnit(testSetID: number, unitID: number) {
   const { data } = await api.delete(`/test-sets/${testSetID}/units/${unitID}`)
+  return data
+}
+
+export async function getUnit(testSetID: number, unitID: number) {
+  const { data } = await api.get<TestUnit>(`/test-sets/${testSetID}/units/${unitID}`)
   return data
 }
 

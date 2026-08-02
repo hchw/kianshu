@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -359,8 +360,13 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 			query[k] = v
 		}
 	}
-	url := strings.TrimRight(e.opts.Host, "/") + path
+	host := e.opts.Host
+	if !strings.Contains(host, "://") {
+		host = "http://" + host
+	}
+	url := strings.TrimRight(host, "/") + path
 	call := APICall{Method: method, URL: url, Headers: headers, Query: query, Body: body}
+	log.Printf("[exec] %s %s", method, url)
 	resp, err := e.opts.CallAPI(call)
 	if err != nil {
 		return nil, err

@@ -32,18 +32,39 @@ definitions:
       node_id:
         type: string
     type: object
+  httpapi.RegisterReq:
+    properties:
+      password:
+        example: "123456"
+        minLength: 6
+        type: string
+      username:
+        example: testuser
+        minLength: 3
+        type: string
+    required:
+    - password
+    - username
+    type: object
   httpapi.addMemberReq:
     properties:
       role:
+        example: edit
         type: string
       user_id:
+        example: 2
         type: integer
+    required:
+    - role
+    - user_id
     type: object
   httpapi.agentNewResp:
     properties:
       ok:
+        example: true
         type: boolean
       session_id:
+        example: 1
         type: integer
     type: object
   httpapi.agentResumeReq:
@@ -53,7 +74,11 @@ definitions:
           $ref: '#/definitions/service.PauseAnswer'
         type: array
       provider_id:
+        example: 1
         type: integer
+    required:
+    - answers
+    - provider_id
     type: object
   httpapi.agentSessionView:
     properties:
@@ -65,56 +90,83 @@ definitions:
           $ref: '#/definitions/service.PauseQuestion'
         type: array
       status:
+        example: active
         type: string
     type: object
   httpapi.agentSubmitReq:
     properties:
       instruction:
+        example: 请为用户登录接口生成测试流
+        minLength: 1
         type: string
       mode:
-        description: edit | generate
+        example: edit
         type: string
       provider_id:
+        example: 1
         type: integer
       selected_nodes:
+        example:
+        - '["get-users-{id}"]'
         items:
           type: string
         type: array
+    required:
+    - instruction
+    - provider_id
     type: object
   httpapi.createFlowReq:
     properties:
       name:
+        example: 我的测试流
+        minLength: 1
         type: string
+    required:
+    - name
     type: object
   httpapi.createScheduleReq:
     properties:
       cron:
+        example: 0 */2 * * *
+        minLength: 1
         type: string
+    required:
+    - cron
     type: object
   httpapi.createTestSetReq:
     properties:
       host:
+        example: https://api.example.com
         type: string
       name:
+        example: 我的测试集
+        minLength: 1
         type: string
+    required:
+    - name
     type: object
   httpapi.deletedResp:
     properties:
       deleted:
+        example: true
         type: boolean
     type: object
   httpapi.draftView:
     properties:
       flow_id:
+        example: 1
         type: integer
       name:
+        example: 我的测试流
         type: string
       tree:
+        example: '{"root":{}}'
         type: string
     type: object
   httpapi.errorResp:
     properties:
       error:
+        example: 参数不合法
         type: string
     type: object
   httpapi.flowListResp:
@@ -127,35 +179,47 @@ definitions:
   httpapi.importConfirmResp:
     properties:
       error:
+        example: 文档非标准
         type: string
       issues:
+        example:
+        - '["缺少 info.title"]'
         items:
           type: string
         type: array
       need_confirmation:
+        example: true
         type: boolean
     type: object
   httpapi.importReq:
     properties:
       confirm:
+        example: true
         type: boolean
       content:
         type: object
       source:
+        example: my-api
         type: string
+    required:
+    - content
     type: object
   httpapi.loginResp:
     properties:
       id:
+        example: 1
         type: integer
       token:
+        example: eyJhbGciOiJIUzI1NiIs...
         type: string
       username:
+        example: testuser
         type: string
     type: object
   httpapi.okResp:
     properties:
       ok:
+        example: true
         type: boolean
     type: object
   httpapi.providerListResp:
@@ -168,48 +232,61 @@ definitions:
   httpapi.providerReq:
     properties:
       api_key:
+        example: sk-xxx
         type: string
       base_url:
+        example: https://api.openai.com
+        format: uri
+        minLength: 1
         type: string
       enabled:
+        example: true
         type: boolean
       model:
+        example: gpt-4
         type: string
       name:
+        example: 我的 OpenAI
+        minLength: 1
         type: string
+    required:
+    - base_url
+    - name
     type: object
   httpapi.providerTestResp:
     properties:
       error:
+        example: 连接超时
         type: string
       ok:
+        example: true
         type: boolean
     type: object
   httpapi.providerView:
     properties:
       base_url:
+        example: https://api.openai.com
         type: string
       enabled:
+        example: true
         type: boolean
       id:
+        example: 1
         type: integer
       model:
+        example: gpt-4
         type: string
       name:
-        type: string
-    type: object
-  httpapi.registerReq:
-    properties:
-      password:
-        type: string
-      username:
+        example: 我的 OpenAI
         type: string
     type: object
   httpapi.registerResp:
     properties:
       id:
+        example: 1
         type: integer
       username:
+        example: testuser
         type: string
     type: object
   httpapi.runListResp:
@@ -229,6 +306,7 @@ definitions:
   httpapi.setScheduleEnabledReq:
     properties:
       enabled:
+        example: true
         type: boolean
     type: object
   httpapi.testSetListResp:
@@ -241,18 +319,25 @@ definitions:
   httpapi.unitBrief:
     properties:
       id:
+        example: 1
         type: integer
       method:
+        example: GET
         type: string
       name:
+        example: 获取用户
         type: string
       path:
+        example: /users/{id}
         type: string
       security:
+        example: '[{"BearerAuth":[]}]'
         type: string
       slug:
+        example: get-users-{id}
         type: string
       tag:
+        example: 用户
         type: string
     type: object
   httpapi.unitBriefListResp:
@@ -272,14 +357,19 @@ definitions:
   httpapi.updateDraftReq:
     properties:
       name:
+        example: 我的测试流
         type: string
       tree: {}
+    required:
+    - tree
     type: object
   httpapi.updateTestSetReq:
     properties:
       host:
+        example: https://new-api.example.com
         type: string
       name:
+        example: 新名称
         type: string
     type: object
   httpapi.versionListResp:
@@ -296,20 +386,25 @@ definitions:
       finished_at:
         type: string
       flow_id:
+        example: 1
         type: integer
       id:
+        example: 1
         type: integer
       node_results:
         type: string
       started_at:
         type: string
       status:
+        example: success
         type: string
       tree:
         type: string
       version_id:
+        example: 1
         type: integer
       version_no:
+        example: 1
         type: integer
     type: object
   model.FlowDraft:
@@ -317,10 +412,13 @@ definitions:
       created_at:
         type: string
       flow_id:
+        example: 1
         type: integer
       id:
+        example: 1
         type: integer
       name:
+        example: 我的测试流
         type: string
       tree:
         type: string
@@ -332,16 +430,22 @@ definitions:
       created_at:
         type: string
       cron:
+        example: 0 */2 * * *
         type: string
       enabled:
+        example: true
         type: boolean
       flow_id:
+        example: 1
         type: integer
       id:
+        example: 1
         type: integer
       job_id:
+        example: job_abc123
         type: string
       test_set_id:
+        example: 1
         type: integer
       updated_at:
         type: string
@@ -351,16 +455,21 @@ definitions:
       created_at:
         type: string
       created_by:
+        example: 1
         type: integer
       enabled:
+        example: true
         type: boolean
       flow_id:
+        example: 1
         type: integer
       id:
+        example: 1
         type: integer
       tree:
         type: string
       version_no:
+        example: 1
         type: integer
     type: object
   model.TestFlow:
@@ -368,12 +477,16 @@ definitions:
       created_at:
         type: string
       created_by:
+        example: 1
         type: integer
       id:
+        example: 1
         type: integer
       name:
+        example: 我的测试流
         type: string
       test_set_id:
+        example: 1
         type: integer
       updated_at:
         type: string
@@ -383,12 +496,16 @@ definitions:
       created_at:
         type: string
       host:
+        example: https://api.example.com
         type: string
       id:
+        example: 1
         type: integer
       name:
+        example: 我的测试集
         type: string
       owner_id:
+        example: 1
         type: integer
       updated_at:
         type: string
@@ -398,12 +515,16 @@ definitions:
       created_at:
         type: string
       id:
+        example: 1
         type: integer
       role:
+        example: edit
         type: string
       test_set_id:
+        example: 1
         type: integer
       user_id:
+        example: 2
         type: integer
     type: object
   model.TestUnit:
@@ -413,16 +534,21 @@ definitions:
       deleted_at:
         type: string
       id:
+        example: 1
         type: integer
       import_id:
+        example: 1
         type: integer
       method:
+        example: GET
         type: string
       name:
+        example: 获取用户
         type: string
       params:
         type: string
       path:
+        example: /users/{id}
         type: string
       request_body:
         type: string
@@ -431,12 +557,15 @@ definitions:
       security:
         type: string
       slug:
+        example: get-users-{id}
         type: string
       spec:
         type: string
       tag:
+        example: 用户
         type: string
       test_set_id:
+        example: 1
         type: integer
       updated_at:
         type: string
@@ -514,7 +643,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/httpapi.registerReq'
+          $ref: '#/definitions/httpapi.RegisterReq'
       produces:
       - application/json
       responses:
@@ -559,7 +688,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/httpapi.registerReq'
+          $ref: '#/definitions/httpapi.RegisterReq'
       produces:
       - application/json
       responses:

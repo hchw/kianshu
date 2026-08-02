@@ -25,6 +25,7 @@ export interface FlowTree {
 
 export interface Draft {
   flow_id: number
+  test_set_id: number
   name: string
   tree: string
 }

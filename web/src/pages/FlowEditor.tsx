@@ -146,6 +146,7 @@ export default function FlowEditor() {
           onSelect={setSelectedNode}
           onTreeChange={onTreeChange}
           onSaved={() => save()}
+          testSetID={draft.test_set_id}
         />
         <aside className="side">
           <AgentDialog

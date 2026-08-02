@@ -61,6 +61,7 @@ func ParseSwagger(data []byte) (*ParsedDoc, []string, error) {
 		Swagger  string          `json:"swagger"`
 		OpenAPI  string          `json:"openapi"`
 		PathsRaw json.RawMessage `json:"paths"`
+		DefsRaw  json.RawMessage `json:"definitions"`
 	}
 	if err := json.Unmarshal(trimmed, &head); err != nil {
 		return nil, nil, fmt.Errorf("%w: 不是合法 JSON: %v", ErrInvalidDocument, err)
@@ -78,21 +79,21 @@ func ParseSwagger(data []byte) (*ParsedDoc, []string, error) {
 		var doc openapi2.T
 		if err := json.Unmarshal(trimmed, &doc); err != nil {
 			reasons = append(reasons, fmt.Sprintf("OpenAPI 2.0 严格解析失败(%v), 已回退通用解析", err))
-			ops = genericOps(head.PathsRaw)
+			ops = genericOps(head.PathsRaw, buildDefs(head.DefsRaw))
 		} else {
 			basePath = doc.BasePath
 			for p, item := range doc.Paths {
 				if item == nil {
 					continue
 				}
-				ops = append(ops, v2Ops(p, item)...)
+				ops = append(ops, v2Ops(p, item, doc.Definitions)...)
 			}
 		}
 	case strings.HasPrefix(head.OpenAPI, "3."):
 		doc, err := openapi3.NewLoader().LoadFromData(trimmed)
 		if err != nil {
 			reasons = append(reasons, fmt.Sprintf("OpenAPI 3.x 严格解析失败(%v), 已回退通用解析", err))
-			ops = genericOps(head.PathsRaw)
+			ops = genericOps(head.PathsRaw, buildDefs(head.DefsRaw))
 		} else {
 			for p, item := range doc.Paths.Map() {
 				if item == nil {
@@ -123,7 +124,7 @@ func ParseSwagger(data []byte) (*ParsedDoc, []string, error) {
 		}
 	default:
 		reasons = append(reasons, fmt.Sprintf("无法识别的版本(swagger=%q, openapi=%q), 已按通用结构解析", head.Swagger, head.OpenAPI))
-		ops = genericOps(head.PathsRaw)
+		ops = genericOps(head.PathsRaw, buildDefs(head.DefsRaw))
 	}
 
 	if len(ops) == 0 {
@@ -132,7 +133,110 @@ func ParseSwagger(data []byte) (*ParsedDoc, []string, error) {
 	return &ParsedDoc{Operations: ops, BasePath: basePath}, reasons, nil
 }
 
-func genericOps(raw json.RawMessage) []ParsedOperation {
+func buildDefs(raw json.RawMessage) map[string]json.RawMessage {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var defs map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &defs); err != nil {
+		return nil
+	}
+	return defs
+}
+
+func resolveRefSchema(raw json.RawMessage, defs map[string]json.RawMessage) json.RawMessage {
+	if defs == nil {
+		return nil
+	}
+	var ref struct {
+		Ref string `json:"$ref"`
+	}
+	if err := json.Unmarshal(raw, &ref); err != nil || ref.Ref == "" || !strings.HasPrefix(ref.Ref, "#/definitions/") {
+		return nil
+	}
+	key := strings.TrimPrefix(ref.Ref, "#/definitions/")
+	if resolved, ok := defs[key]; ok {
+		return resolved
+	}
+	return nil
+}
+
+func resolveParamRefs(raw json.RawMessage, defs map[string]json.RawMessage) json.RawMessage {
+	if defs == nil {
+		return raw
+	}
+	var params []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return raw
+	}
+	changed := false
+	for i, p := range params {
+		_, hasSchema := p["schema"]
+		if !hasSchema {
+			if pRef, ok := p["$ref"]; ok {
+				if resolved := resolveRefSchema(pRef, defs); resolved != nil {
+					params[i] = map[string]json.RawMessage{"schema": resolved}
+					changed = true
+				}
+			}
+			continue
+		}
+		if resolved := resolveRefSchema(p["schema"], defs); resolved != nil {
+			p["schema"] = resolved
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	b, _ := json.Marshal(params)
+	return b
+}
+
+func resolveRefBody(raw json.RawMessage, defs map[string]json.RawMessage) json.RawMessage {
+	if len(bytes.TrimSpace(raw)) == 0 || defs == nil {
+		return raw
+	}
+	var body struct {
+		Schema json.RawMessage `json:"schema"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return raw
+	}
+	if resolved := resolveRefSchema(body.Schema, defs); resolved != nil {
+		body.Schema = resolved
+		b, _ := json.Marshal(body)
+		return b
+	}
+	if body.Content != nil {
+		var content map[string]json.RawMessage
+		if err := json.Unmarshal(body.Content, &content); err != nil {
+			return raw
+		}
+		changed := false
+		for ct, media := range content {
+			var mediaObj struct {
+				Schema json.RawMessage `json:"schema"`
+			}
+			if err := json.Unmarshal(media, &mediaObj); err != nil || mediaObj.Schema == nil {
+				continue
+			}
+			if resolved := resolveRefSchema(mediaObj.Schema, defs); resolved != nil {
+				content[ct], _ = json.Marshal(map[string]json.RawMessage{"schema": resolved})
+				changed = true
+			}
+		}
+		if changed {
+			body.Content, _ = json.Marshal(content)
+			b, _ := json.Marshal(body)
+			return b
+		}
+	}
+	return raw
+}
+
+func genericOps(raw json.RawMessage, defs map[string]json.RawMessage) []ParsedOperation {
 	var paths map[string]map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &paths); err != nil {
 		return nil
@@ -167,8 +271,8 @@ func genericOps(raw json.RawMessage) []ParsedOperation {
 				Path:        p,
 				Tag:         tag,
 				Name:        firstNonEmpty(op.Summary, op.OperationID),
-				Params:      rawOrNull(op.Parameters),
-				RequestBody: rawOrNull(op.RequestBody),
+				Params:      rawOrNull(resolveParamRefs(op.Parameters, defs)),
+				RequestBody: rawOrNull(resolveRefBody(op.RequestBody, defs)),
 				Responses:   rawOrNull(op.Responses),
 				Security:    rawOrNull(op.Security),
 				Spec:        string(opRaw),
@@ -198,17 +302,17 @@ var v2Methods = []struct {
 	{"OPTIONS", func(p *openapi2.PathItem) *openapi2.Operation { return p.Options }},
 }
 
-func v2Ops(path string, item *openapi2.PathItem) []ParsedOperation {
+func v2Ops(path string, item *openapi2.PathItem, defs map[string]*openapi2.SchemaRef) []ParsedOperation {
 	var out []ParsedOperation
 	for _, m := range v2Methods {
 		if op := m.get(item); op != nil {
-			out = append(out, v2Op(path, m.name, op))
+			out = append(out, v2Op(path, m.name, op, defs))
 		}
 	}
 	return out
 }
 
-func v2Op(path, method string, op *openapi2.Operation) ParsedOperation {
+func v2Op(path, method string, op *openapi2.Operation, defs map[string]*openapi2.SchemaRef) ParsedOperation {
 	tag := ""
 	if len(op.Tags) > 0 {
 		tag = op.Tags[0]
@@ -216,7 +320,15 @@ func v2Op(path, method string, op *openapi2.Operation) ParsedOperation {
 	requestBody := "null"
 	for _, p := range op.Parameters {
 		if p != nil && p.In == "body" {
-			requestBody = mustJSON(p.Schema)
+			schema := p.Schema
+			if schema != nil && schema.Ref != "" && defs != nil {
+				ref := strings.TrimPrefix(schema.Ref, "#/definitions/")
+				if def, ok := defs[ref]; ok && def.Value != nil {
+					requestBody = mustJSON(def.Value)
+					break
+				}
+			}
+			requestBody = mustJSON(schema)
 			break
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -61,6 +62,11 @@ func HTTPCallAPI(host string, timeout time.Duration) func(exec.APICall) (any, er
 		}
 		if call.Body != nil {
 			req.Header.Set("Content-Type", "application/json")
+			b, _ := json.Marshal(call.Body)
+			log.Printf("[req] body %s", string(b))
+		}
+		for k, v := range call.Headers {
+			log.Printf("[req] header %s: %s", k, v)
 		}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -71,6 +77,7 @@ func HTTPCallAPI(host string, timeout time.Duration) func(exec.APICall) (any, er
 		if err != nil {
 			return nil, err
 		}
+		log.Printf("[resp] %d %s", resp.StatusCode, strings.TrimSpace(string(data)))
 		if resp.StatusCode >= 400 {
 			return nil, fmt.Errorf("请求失败: HTTP %d %s", resp.StatusCode, strings.TrimSpace(string(data)))
 		}
