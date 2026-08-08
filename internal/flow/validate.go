@@ -49,7 +49,9 @@ func (r Result) HasErrors() bool { return len(r.Errors) > 0 }
 
 // Validate runs whole-tree validation over the tree.
 func Validate(t *Tree, opts ValidatorOptions) Result {
-	res := Result{}
+	// 初始化空 slice 而非 nil：保证 JSON 序列化输出 [] 而非 null，
+	// 避免前端对 errors/warnings 的 .length 访问崩溃。
+	res := Result{Errors: []ValidationError{}, Warnings: []ValidationError{}}
 	for _, e := range t.ValidateTreeShape() {
 		res.Errors = append(res.Errors, e)
 	}

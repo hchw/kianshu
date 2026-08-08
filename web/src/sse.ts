@@ -5,6 +5,7 @@ export interface SSESessionHandlers {
   onDone: () => void
   onError: (msg: string) => void
   onDisconnect: () => void
+  onAbort: () => void
 }
 
 // openSSE consumes the /agent/submit endpoint as Server-Sent Events via fetch,
@@ -51,7 +52,10 @@ export function openSSE(
       }
       h.onDone()
     } catch (e) {
-      if ((e as Error).name === 'AbortError') return
+      if ((e as Error).name === 'AbortError') {
+        h.onAbort()
+        return
+      }
       h.onError((e as Error).message)
       h.onDisconnect()
     }

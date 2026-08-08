@@ -5,13 +5,16 @@ import { apiError } from '../../api/client'
 import type { FlowTree } from '../../api/flow'
 import type { Provider } from '../../api/providers'
 import { openSSE } from '../../sse'
-import { NODE_LABELS } from '../../lib/tree'
+import { NODE_LABELS, applyToolMutation } from '../../lib/tree'
+import { BusyButton } from '../feedback/BusyButton'
+import { ErrorNote } from '../feedback/ErrorNote'
 
 interface Props {
   flowID: number
   providers: Provider[]
   tree: FlowTree
   onChanged: () => void
+  onTreePreview: (t: FlowTree) => void
 }
 
 interface Message {
@@ -21,7 +24,7 @@ interface Message {
   tool_call_id?: string
 }
 
-export default function AgentDialog({ flowID, providers, tree, onChanged }: Props) {
+export default function AgentDialog({ flowID, providers, tree, onChanged, onTreePreview }: Props) {
   const [providerID, setProviderID] = useState(0)
   const [instruction, setInstruction] = useState('')
   const [mode, setMode] = useState<'edit' | 'generate'>('generate')
@@ -32,6 +35,11 @@ export default function AgentDialog({ flowID, providers, tree, onChanged }: Prop
   const [status, setStatus] = useState('active')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [roundTexts, setRoundTexts] = useState<Record<number, string>>({})
+  const [liveRound, setLiveRound] = useState<number | null>(null)
+  const [liveText, setLiveText] = useState('')
+  const liveRoundRef = useRef<number | null>(null)
+  const liveTextRef = useRef('')
   const abortRef = useRef<{ abort: () => void } | null>(null)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -76,8 +84,19 @@ export default function AgentDialog({ flowID, providers, tree, onChanged }: Prop
     setErr('')
     setBusy(true)
     setEvents([])
+    setRoundTexts({})
+    setLiveRound(null)
+    setLiveText('')
+    liveRoundRef.current = null
+    liveTextRef.current = ''
     setMessages((cur) => [...cur, { role: 'user', content: instruction.trim() }])
     scrollBottom()
+
+    // 深克隆当前树作为快照，用于失败/中止/断连时恢复
+    const snapshot: FlowTree = JSON.parse(JSON.stringify(tree))
+    // workingTree 追踪 agent 逐步变异后的中间状态
+    let workingTree: FlowTree = snapshot
+
     const body = {
       provider_id: providerID,
       instruction: instruction.trim(),
@@ -87,10 +106,44 @@ export default function AgentDialog({ flowID, providers, tree, onChanged }: Prop
     const url = `/api/flow/flows/${flowID}/agent/submit`
     abortRef.current = openSSE(url, body, {
       onEvent: (ev) => {
-        setEvents((cur) => [...cur, ev])
+        if (ev.kind === 'round') {
+          liveRoundRef.current = ev.round
+          liveTextRef.current = ''
+          setLiveRound(ev.round)
+          setLiveText('')
+        } else if (ev.kind === 'text') {
+          liveTextRef.current += ev.text ?? ''
+          if (liveRoundRef.current != null) {
+            setLiveRound(liveRoundRef.current)
+            setLiveText(liveTextRef.current)
+          }
+        } else {
+          // tool event – finalize this round's accumulated assistant text
+          if (liveRoundRef.current != null && liveTextRef.current) {
+            setRoundTexts((r) => ({ ...r, [liveRoundRef.current!]: liveTextRef.current }))
+          }
+          liveRoundRef.current = null
+          liveTextRef.current = ''
+          setLiveRound(null)
+          setLiveText('')
+          setEvents((cur) => [...cur, ev])
+
+          // 变异类工具事件 → 本地回放到画布
+          if (ev.tool && ev.result) {
+            const next = applyToolMutation(workingTree, ev)
+            if (next !== workingTree) {
+              workingTree = next
+              onTreePreview(next)
+            }
+          }
+        }
         scrollBottom()
       },
       onDone: async () => {
+        setLiveRound(null)
+        setLiveText('')
+        liveRoundRef.current = null
+        liveTextRef.current = ''
         setBusy(false)
         setInstruction('')
         await refreshSession()
@@ -99,10 +152,22 @@ export default function AgentDialog({ flowID, providers, tree, onChanged }: Prop
       onError: (msg) => {
         setErr(msg)
         setBusy(false)
+        onTreePreview(snapshot)
       },
       onDisconnect: () => {
         setErr('连接中断,可重试;会话历史已保留,恢复上下文。')
         setBusy(false)
+        onTreePreview(snapshot)
+      },
+      onAbort: async () => {
+        setLiveRound(null)
+        setLiveText('')
+        liveRoundRef.current = null
+        liveTextRef.current = ''
+        setBusy(false)
+        onTreePreview(snapshot)
+        await refreshSession()
+        onChanged()
       },
     })
   }
@@ -184,10 +249,17 @@ export default function AgentDialog({ flowID, providers, tree, onChanged }: Prop
         value={instruction}
         onChange={(e) => setInstruction(e.target.value)}
       />
-      <button onClick={submit} disabled={busy}>
-        {busy ? '执行中…' : '提交'}
-      </button>
-      {err && <p className="err">{err}</p>}
+      <div className="row tight">
+        <BusyButton className="primary" onClick={submit} busy={busy}>
+          {busy ? '执行中…' : '提交'}
+        </BusyButton>
+        {busy && (
+          <button className="danger" onClick={() => abortRef.current?.abort()}>
+            停止
+          </button>
+        )}
+      </div>
+      {err && <ErrorNote>{err}</ErrorNote>}
       <div className="log-box" ref={boxRef}>
         {messages
           .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -197,14 +269,32 @@ export default function AgentDialog({ flowID, providers, tree, onChanged }: Prop
               {m.content && <div>{m.content}</div>}
             </div>
           ))}
-        {events.map((ev, i) => (
-          <div key={`ev-${i}`} className="chat-msg tool">
-            <div className="chat-role">
-              #{ev.round} {ev.tool}
+        {events.map((ev, i) => {
+          const isFirstInRound = i === 0 || events[i - 1].round !== ev.round
+          const rText = roundTexts[ev.round]
+          return (
+            <div key={`ev-${i}`}>
+              {isFirstInRound && rText && (
+                <div className="chat-msg assistant">
+                  <div className="chat-role">助手 #{ev.round}</div>
+                  <div className="chat-text">{rText}</div>
+                </div>
+              )}
+              <div className="chat-msg tool">
+                <div className="chat-role">
+                  #{ev.round} {ev.tool}
+                </div>
+                <div className="mono">{JSON.stringify(ev.result)}</div>
+              </div>
             </div>
-            <div className="mono">{JSON.stringify(ev.result)}</div>
+          )
+        })}
+        {liveRound != null && (
+          <div className="chat-msg assistant live">
+            <div className="chat-role">助手 #{liveRound}</div>
+            <div className="chat-text">{liveText}</div>
           </div>
-        ))}
+        )}
       </div>
       {status === 'paused' && questions.length > 0 && (
         <div className="card sub">

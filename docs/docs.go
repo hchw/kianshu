@@ -132,6 +132,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/flow/flows/{flowID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "硬删除指定测试流及其草稿、版本、运行记录与定时调度,并取消已注册的定时任务。需要编辑权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "删除测试流",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "已删除",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.deletedResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "流不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "删除失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
         "/flow/flows/{flowID}/agent/new": {
             "post": {
                 "security": [
@@ -3159,9 +3217,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "args": {},
+                "kind": {
+                    "description": "\"round\" | \"text\" | \"tool\"(默认)",
+                    "type": "string"
+                },
                 "result": {},
                 "round": {
                     "type": "integer"
+                },
+                "text": {
+                    "description": "Text is the incremental assistant content for kind=text events.",
+                    "type": "string"
                 },
                 "tool": {
                     "type": "string"
@@ -3214,25 +3280,17 @@ const docTemplate = `{
                 }
             }
         }
-    },
-    "securityDefinitions": {
-        "BearerAuth": {
-            "description": "登录后获得的会话令牌,请求时以 ` + "`" + `Authorization: Bearer \u003ctoken\u003e` + "`" + ` 形式携带。",
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header"
-        }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0.0",
+	Version:          "1.0",
 	Host:             "",
 	BasePath:         "/api",
 	Schemes:          []string{},
-	Title:            "鉴枢 kianshu API",
-	Description:      "鉴枢(kianshu) — AI 驱动的集成测试平台 REST API。除注册、登录外,所有接口均需携带会话令牌:`Authorization: Bearer <token>`(token 由登录接口返回)。权限模型:owner 完全控制;成员角色 read(只读)/ edit(可编辑)。",
+	Title:            "鉴枢 Kianshu API",
+	Description:      "导入 Swagger/OpenAPI 文档生成测试单元；LLM 生成可编辑的树形测试流；支持试运行、不可变版本快照与定时调度。",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

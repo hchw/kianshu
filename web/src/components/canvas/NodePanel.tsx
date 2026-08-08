@@ -8,11 +8,12 @@ interface Props {
   nodeID: string
   onTreeChange: (t: FlowTree) => void
   onSaved: () => void
+  onDelete: (id: string) => void
   onClose: () => void
   testSetID: number
 }
 
-export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onClose, testSetID }: Props) {
+export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelete, onClose, testSetID }: Props) {
   const node: FlowNode | undefined = tree.nodes[nodeID]
   const [config, setConfig] = useState<Record<string, unknown>>({})
   const [inputs, setInputs] = useState<Record<string, string>>({})
@@ -244,7 +245,17 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onClose
         </div>
         <div className="sep" />
         <div>{renderConfig()}</div>
-        <button onClick={save}>保存</button>
+        <button className="primary" onClick={save}>保存</button>
+        {node.type !== 'start' && (
+          <button
+            className="link danger"
+            onClick={() => {
+              if (confirm(`删除节点 ${nodeID} 及其全部子节点?`)) onDelete(nodeID)
+            }}
+          >
+            删除节点
+          </button>
+        )}
       </div>
     </div>
   )

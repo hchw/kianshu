@@ -7,6 +7,10 @@ import {
   setScheduleEnabled,
   type FlowSchedule,
 } from '../../api/schedule'
+import { BusyButton } from '../feedback/BusyButton'
+import { EmptyState } from '../feedback/EmptyState'
+import { ErrorNote } from '../feedback/ErrorNote'
+import { Clock } from 'lucide-react'
 
 interface Props {
   flowID: number
@@ -71,11 +75,11 @@ export default function SchedulePanel({ flowID }: Props) {
       <h3>定时调度</h3>
       <form className="row tight" onSubmit={add}>
         <input placeholder="cron 表达式" value={cron} onChange={(e) => setCron(e.target.value)} />
-        <button type="submit" disabled={busy}>
+        <BusyButton type="submit" className="primary" busy={busy}>
           添加
-        </button>
+        </BusyButton>
       </form>
-      {err && <p className="err">{err}</p>}
+      {err && <ErrorNote>{err}</ErrorNote>}
       <div className="list">
         {schedules.map((s) => (
           <div key={s.id} className="run-row">
@@ -89,7 +93,9 @@ export default function SchedulePanel({ flowID }: Props) {
             </button>
           </div>
         ))}
-        {schedules.length === 0 && <p className="muted">暂无定时任务</p>}
+        {schedules.length === 0 && (
+          <EmptyState compact icon={<Clock size={20} strokeWidth={1.5} aria-hidden="true" />} title="暂无定时任务" />
+        )}
       </div>
     </div>
   )

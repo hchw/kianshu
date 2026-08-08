@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { apiError } from '../../api/client'
 import { addMember, removeMember } from '../../api/testset'
+import { ErrorNote } from '../feedback/ErrorNote'
 
 interface Props {
   testSetID: number
@@ -48,9 +49,11 @@ export default function MembersPanel({ testSetID, ownerID }: Props) {
           <option value="edit">edit</option>
           <option value="read">read</option>
         </select>
-        <button onClick={add}>添加</button>
+        <button className="primary" onClick={add}>
+          添加
+        </button>
       </div>
-      {err && <p className="err">{err}</p>}
+      {err && <ErrorNote>{err}</ErrorNote>}
       <table className="table">
         <thead>
           <tr>

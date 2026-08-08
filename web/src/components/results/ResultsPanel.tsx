@@ -2,6 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import type { FlowVersion, RunLog } from '../../api/flow'
 import { getRun, getVersion, runVersion, trialRun } from '../../api/flow'
 import { apiError } from '../../api/client'
+import { BusyButton } from '../feedback/BusyButton'
+import { EmptyState } from '../feedback/EmptyState'
+import { ErrorNote } from '../feedback/ErrorNote'
+import { History } from 'lucide-react'
 
 interface Props {
   flowID: number
@@ -77,11 +81,11 @@ export default function ResultsPanel({ flowID, runs, versions, onChanged, onRest
     <div className="card side-card">
       <h3>执行结果</h3>
       <div className="row tight">
-        <button onClick={trial} disabled={busy}>
+        <BusyButton className="primary" onClick={trial} busy={busy}>
           试运行草稿
-        </button>
+        </BusyButton>
       </div>
-      {err && <p className="err">{err}</p>}
+      {err && <ErrorNote>{err}</ErrorNote>}
       {versions.length > 0 && (
         <div className="muted">
           版本:
@@ -109,7 +113,9 @@ export default function ResultsPanel({ flowID, runs, versions, onChanged, onRest
             </button>
           </div>
         ))}
-        {runs.length === 0 && <p className="muted">暂无执行</p>}
+        {runs.length === 0 && (
+          <EmptyState compact icon={<History size={20} strokeWidth={1.5} aria-hidden="true" />} title="暂无执行" />
+        )}
       </div>
       {latest.length > 0 && (
         <div className="badges">

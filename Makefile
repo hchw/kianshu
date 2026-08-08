@@ -4,7 +4,7 @@ KS_ENC_KEY ?= dev-only-32-byte-secret-key-0000
 export KS_ENC_KEY
 
 swagger:
-	swag init -g cmd/server/swagger.go -o docs --ot go,json,yaml
+	swag init -g cmd/server/main.go -o docs --ot go,json,yaml
 
 dev:
 	@trap 'kill 0' EXIT; \
@@ -19,15 +19,15 @@ dev-frontend:
 	cd web && npm run dev
 
 build:
-	GOTOOLCHAIN=go1.25.6 go build -o server ./cmd/server
+	GOTOOLCHAIN=go1.26.5 go build -o server ./cmd/server
 	cd web && npm run build
 
 test:
-	GOTOOLCHAIN=go1.25.6 go test ./...
+	GOTOOLCHAIN=go1.26.5 go test ./...
 	cd web && npm test
 
 lint:
-	GOTOOLCHAIN=go1.25.6 go vet ./...
+	GOTOOLCHAIN=go1.26.5 go vet ./...
 	cd web && npm run lint
 
 clean:

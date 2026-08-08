@@ -51,4 +51,7 @@ Thumbs.db
 .opencode
 openspec
 server
+main
 *.db
+.omp
+.pi

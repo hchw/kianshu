@@ -48,6 +48,11 @@ type Node struct {
 	Inputs   map[string]IOKey `json:"inputs,omitempty"`
 	Outputs  map[string]IOKey `json:"outputs,omitempty"`
 	Config   json.RawMessage  `json:"config,omitempty"`
+	// X/Y are optional canvas coordinates (pointer so nil = not placed by the
+	// user; the editor auto-lays out unplaced nodes). Pure presentation data:
+	// execution ignores them.
+	X *float64 `json:"x,omitempty"`
+	Y *float64 `json:"y,omitempty"`
 }
 
 // Tree is the whole-tree JSON representation stored in drafts and versions.

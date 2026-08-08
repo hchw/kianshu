@@ -139,6 +139,37 @@ func (s *Server) flowTestSet(flowID uint) (uint, bool) {
 	return f.TestSetID, f.TestSetID != 0
 }
 
+// handleDeleteFlow hard-deletes a flow together with its draft, versions,
+// execution logs and schedules, and cancels registered cron jobs.
+//
+//	@Summary	删除测试流
+//	@Description	硬删除指定测试流及其草稿、版本、运行记录与定时调度,并取消已注册的定时任务。需要编辑权限。
+//	@Tags		测试流
+//	@Produce	json
+//	@Security	BearerAuth
+//	@Param		flowID	path	uint	true	"流 ID"
+//	@Success	200	{object}	deletedResp	"已删除"
+//	@Failure	400	{object}	errorResp	"无效的流 ID"
+//	@Failure	403	{object}	errorResp	"无编辑权限"
+//	@Failure	404	{object}	errorResp	"流不存在"
+//	@Failure	500	{object}	errorResp	"删除失败"
+//	@Router		/flow/flows/{flowID} [delete]
+func (s *Server) handleDeleteFlow(c *gin.Context) {
+	flowID, _, ok := s.flowEditable(c)
+	if !ok {
+		return
+	}
+	if err := service.DeleteFlow(s.DB, s.Schedules, flowID); err != nil {
+		if errors.Is(err, service.ErrFlowNotFound) {
+			writeErr(c, http.StatusNotFound, "流不存在")
+			return
+		}
+		writeErr(c, http.StatusInternalServerError, "删除失败")
+		return
+	}
+	writeJSON(c, http.StatusOK, gin.H{"deleted": true})
+}
+
 // handleGetDraft returns a flow's working draft (editable tree snapshot).
 //
 //	@Summary	获取流草稿

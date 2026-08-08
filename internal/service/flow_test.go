@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -358,5 +359,45 @@ func TestConcurrentSaveAndEnableDistinctVersionNos(t *testing.T) {
 	}
 	if int(cnt) != n {
 		t.Fatalf("expected %d versions, got %d", n, cnt)
+	}
+}
+
+// TestDeleteFlow verifies hard deletion cascades across draft/versions/runs/
+// schedules, cancels registered jobs and rejects missing flows.
+func TestDeleteFlow(t *testing.T) {
+	gdb := testDB(t)
+	f, err := CreateFlow(gdb, 1, 1, "待删流")
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	if err := gdb.Create(&model.FlowVersion{FlowID: f.ID, VersionNo: 1, Tree: "{}", Enabled: true}).Error; err != nil {
+		t.Fatalf("create version: %v", err)
+	}
+	if err := gdb.Create(&model.ExecutionLog{FlowID: f.ID, Status: "success", Tree: "{}"}).Error; err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	fs := newFakeScheduler()
+	if err := gdb.Create(&model.FlowSchedule{FlowID: f.ID, TestSetID: 1, Cron: "0 * * * *", JobID: "job-1"}).Error; err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	mgr := NewScheduleManager(gdb, fs, time.Minute)
+
+	if err := DeleteFlow(gdb, mgr, f.ID); err != nil {
+		t.Fatalf("delete flow: %v", err)
+	}
+	for _, m := range []any{&model.TestFlow{}, &model.FlowDraft{}, &model.FlowVersion{}, &model.ExecutionLog{}, &model.FlowSchedule{}} {
+		var cnt int64
+		if err := gdb.Model(m).Count(&cnt).Error; err != nil {
+			t.Fatalf("count %T: %v", m, err)
+		}
+		if cnt != 0 {
+			t.Fatalf("expected 0 rows in %T after delete, got %d", m, cnt)
+		}
+	}
+	if len(fs.removed) != 1 || fs.removed[0] != "job-1" {
+		t.Fatalf("expected scheduler.Remove(job-1), got %v", fs.removed)
+	}
+	if err := DeleteFlow(gdb, mgr, f.ID); !errors.Is(err, ErrFlowNotFound) {
+		t.Fatalf("expected ErrFlowNotFound on second delete, got %v", err)
 	}
 }

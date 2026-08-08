@@ -588,9 +588,15 @@ definitions:
   service.Event:
     properties:
       args: {}
+      kind:
+        description: '"round" | "text" | "tool"(默认)'
+        type: string
       result: {}
       round:
         type: integer
+      text:
+        description: Text is the incremental assistant content for kind=text events.
+        type: string
       tool:
         type: string
     type: object
@@ -626,10 +632,9 @@ definitions:
     type: object
 info:
   contact: {}
-  description: '鉴枢(kianshu) — AI 驱动的集成测试平台 REST API。除注册、登录外,所有接口均需携带会话令牌:`Authorization:
-    Bearer <token>`(token 由登录接口返回)。权限模型:owner 完全控制;成员角色 read(只读)/ edit(可编辑)。'
-  title: 鉴枢 kianshu API
-  version: 1.0.0
+  description: 导入 Swagger/OpenAPI 文档生成测试单元；LLM 生成可编辑的树形测试流；支持试运行、不可变版本快照与定时调度。
+  title: 鉴枢 Kianshu API
+  version: "1.0"
 paths:
   /auth/login:
     post:
@@ -707,6 +712,43 @@ paths:
       summary: 注册账号
       tags:
       - 认证
+  /flow/flows/{flowID}:
+    delete:
+      description: 硬删除指定测试流及其草稿、版本、运行记录与定时调度,并取消已注册的定时任务。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 已删除
+          schema:
+            $ref: '#/definitions/httpapi.deletedResp'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 流不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 删除失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 删除测试流
+      tags:
+      - 测试流
   /flow/flows/{flowID}/agent/new:
     post:
       description: 清空流的 LLM 会话历史,开启全新会话。需要编辑权限。
@@ -2106,10 +2148,4 @@ paths:
       summary: 查询测试单元(工具精简版)
       tags:
       - 测试单元
-securityDefinitions:
-  BearerAuth:
-    description: '登录后获得的会话令牌,请求时以 `Authorization: Bearer <token>` 形式携带。'
-    in: header
-    name: Authorization
-    type: apiKey
 swagger: "2.0"

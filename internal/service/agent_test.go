@@ -179,8 +179,14 @@ func TestRunAgentEndToEnd(t *testing.T) {
 	if !res.Finished {
 		t.Fatalf("expected finished, got %+v", res)
 	}
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
+	var toolEvents []Event
+	for _, ev := range events {
+		if ev.Kind == EventKindTool || ev.Kind == "" {
+			toolEvents = append(toolEvents, ev)
+		}
+	}
+	if len(toolEvents) != 1 {
+		t.Fatalf("expected 1 tool event, got %d (%+v)", len(toolEvents), events)
 	}
 	d, _ := GetDraft(gdb, flowID)
 	tree, _ := flow.ParseTree(d.Tree)
@@ -452,5 +458,141 @@ func TestResumeGenerationContinues(t *testing.T) {
 	sess, _ := GetFlowSession(gdb, flowID, 1)
 	if sess.Status != model.SessionActive {
 		t.Fatalf("expected active session after resume, got %s", sess.Status)
+	}
+}
+
+// streamingFakeProvider implements StreamingProvider: each round's scripted
+// content is delivered to onChunk character by character, mimicking an SSE
+// delta stream.
+type streamingFakeProvider struct {
+	fakeProvider
+}
+
+func (f *streamingFakeProvider) StreamChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest, onChunk openai.StreamCallback) (*openai.CompletionResponse, error) {
+	f.visited = append(f.visited, req)
+	var round scriptedRound
+	if len(f.script) > 0 {
+		round = f.script[0]
+		f.script = f.script[1:]
+	}
+	if round.err != nil {
+		return nil, round.err
+	}
+	if round.content != nil {
+		for _, r := range *round.content {
+			onChunk(string(r))
+		}
+	}
+	return &openai.CompletionResponse{
+		Choices: []struct {
+			Message openai.Message `json:"message"`
+		}{{Message: openai.Message{Content: round.content, ToolCalls: round.toolCalls}}},
+	}, nil
+}
+
+// TestRunAgentStreamsText verifies the streaming path: the assistant's reply
+// is pushed token by token as round/text events, deep thinking is disabled on
+// the wire, and the assembled result still lands in the draft/session.
+func TestRunAgentStreamsText(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+
+	fake := &streamingFakeProvider{fakeProvider: fakeProvider{
+		model: "m",
+		script: []scriptedRound{
+			{toolCalls: []openai.ToolCall{
+				tc(toolCreateNode, `{"id":"n2","type":"adapter","parent":"n1"}`),
+			}},
+			{content: strPtrS("已生成完成,请校验")},
+		},
+	}}
+	var events []Event
+	res, err := RunAgent(context.Background(), gdb, flowID, 1, AgentOptions{
+		Provider:    fake,
+		Instruction: "加一个 adapter",
+		Mode:        ModeEdit,
+		Emit:        func(ev Event) { events = append(events, ev) },
+	})
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if !res.Finished {
+		t.Fatalf("expected finished, got %+v", res)
+	}
+
+	// Streaming went through the provider: round -> text -> tool ordering.
+	if len(events) < 3 {
+		t.Fatalf("expected round/text/tool events, got %+v", events)
+	}
+	if events[0].Kind != EventKindRound || events[0].Round != 1 {
+		t.Fatalf("expected round event first, got %+v", events[0])
+	}
+	var text strings.Builder
+	var toolCount int
+	for _, ev := range events {
+		switch ev.Kind {
+		case EventKindText:
+			text.WriteString(ev.Text)
+		case EventKindTool:
+			toolCount++
+		}
+	}
+	if text.String() != "已生成完成,请校验" {
+		t.Fatalf("streamed text mismatch: %q", text.String())
+	}
+	if toolCount != 1 {
+		t.Fatalf("expected 1 tool event, got %d", toolCount)
+	}
+
+	// Deep thinking disabled on the wire for every round.
+	if len(fake.visited) != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", len(fake.visited))
+	}
+	for i, req := range fake.visited {
+		if req.Thinking == nil || req.Thinking.Type != "disabled" {
+			t.Fatalf("round %d: expected thinking disabled, got %+v", i+1, req.Thinking)
+		}
+	}
+
+	// Draft updated and session persisted as usual.
+	d, _ := GetDraft(gdb, flowID)
+	tree, _ := flow.ParseTree(d.Tree)
+	if tree.Nodes["n2"] == nil {
+		t.Fatalf("draft not updated with new node")
+	}
+}
+
+// TestGenerateFlowStreamsAnalysis verifies the generate workflow's analysis
+// phase also streams round/text events before pausing.
+func TestGenerateFlowStreamsAnalysis(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+
+	fake := &streamingFakeProvider{fakeProvider: fakeProvider{
+		model:   "m",
+		script:  []scriptedRound{{content: strPtrS("Q: 认证方式冲突,请确认")}},
+	}}
+	var events []Event
+	res, err := GenerateFlow(context.Background(), gdb, flowID, 1, "生成流程", fake, AgentHooks{Emit: func(ev Event) {
+		events = append(events, ev)
+	}})
+	if err != nil {
+		t.Fatalf("GenerateFlow: %v", err)
+	}
+	if res.Finished {
+		t.Fatalf("expected paused, got %+v", res)
+	}
+	var text strings.Builder
+	for _, ev := range events {
+		if ev.Kind == EventKindText {
+			text.WriteString(ev.Text)
+		}
+	}
+	if text.String() != "Q: 认证方式冲突,请确认" {
+		t.Fatalf("analysis text not streamed: %q", text.String())
+	}
+	// The pause event carries the analysis round number.
+	if len(res.Events) != 1 || res.Events[0].Round != 1 {
+		t.Fatalf("expected pause event at round 1, got %+v", res.Events)
 	}
 }

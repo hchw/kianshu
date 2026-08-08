@@ -1,10 +1,12 @@
 import { api } from './client'
 
 export interface AgentEvent {
+  kind?: 'tool' | 'text' | 'round'
   round: number
-  tool: string
+  tool?: string
   args?: unknown
-  result: unknown
+  result?: unknown
+  text?: string
 }
 
 export interface AgentResult {

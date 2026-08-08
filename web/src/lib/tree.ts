@@ -1,4 +1,5 @@
-import type { FlowTree } from '../api/flow'
+import type { FlowTree, FlowNode } from '../api/flow'
+import type { AgentEvent } from '../api/agent'
 
 export interface LayoutPosition {
   x: number
@@ -24,21 +25,29 @@ export function parseTree(json: string | null | undefined): FlowTree {
 }
 
 // layoutTree places nodes on a level grid: level-order traversal assigns each
-// node x = layer*W and y = ordinal-in-layer*H. cache-set nodes are laid out in
-// a side column and never linked.
+// node x = layer*W and y = ordinal-in-layer*H. Nodes with explicit x/y
+// coordinates (user-placed) keep them and consume no grid slot. cache-set
+// nodes are laid out in a side column and never linked.
 export function layoutTree(tree: FlowTree): LayoutResult {
   const positions = new Map<string, LayoutPosition>()
   const ordered: string[] = []
   const isCache = new Set(tree.cacheSets ?? [])
 
   const inLayer: string[] = []
+  const visited = new Set<string>()
   const counts = new Map<number, number>()
   const visit = (id: string, layer: number) => {
-    if (isCache.has(id) || positions.has(id)) return
-    positions.set(id, { x: layer * W, y: (counts.get(layer) ?? 0) * H, layer })
-    counts.set(layer, (counts.get(layer) ?? 0) + 1)
+    if (isCache.has(id) || visited.has(id)) return
+    visited.add(id)
     ordered.push(id)
     inLayer.push(id)
+    const n = tree.nodes[id]
+    if (n && n.x != null && n.y != null) {
+      positions.set(id, { x: n.x, y: n.y, layer })
+    } else {
+      positions.set(id, { x: layer * W, y: (counts.get(layer) ?? 0) * H, layer })
+      counts.set(layer, (counts.get(layer) ?? 0) + 1)
+    }
   }
 
   visit(tree.start, 0)
@@ -52,8 +61,13 @@ export function layoutTree(tree: FlowTree): LayoutResult {
 
   let side = 0
   for (const id of isCache) {
-    positions.set(id, { x: (maxLayer(positions) + 1) * W, y: side * H, layer: -1 })
-    side++
+    const n = tree.nodes[id]
+    if (n && n.x != null && n.y != null) {
+      positions.set(id, { x: n.x, y: n.y, layer: -1 })
+    } else {
+      positions.set(id, { x: (maxLayer(positions) + 1) * W, y: side * H, layer: -1 })
+      side++
+    }
     ordered.push(id)
   }
   return { positions, ordered }
@@ -65,6 +79,41 @@ function maxLayer(positions: Map<string, LayoutPosition>): number {
     if (p.layer > m) m = p.layer
   }
   return m
+}
+
+// collectSubtree gathers id plus every descendant reachable through children.
+function collectSubtree(tree: FlowTree, id: string): Set<string> {
+  const seen = new Set<string>()
+  const stack = [id]
+  while (stack.length) {
+    const cur = stack.pop()!
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    for (const c of tree.nodes[cur]?.children ?? []) stack.push(c)
+  }
+  return seen
+}
+
+// deleteNode removes a node and its whole subtree from the tree, and drops the
+// reference from its parent's children. The start node is protected: deleting
+// it would break the single-root invariant, so the tree is returned unchanged.
+export function deleteNode(tree: FlowTree, id: string): FlowTree {
+  if (tree.start === id) return tree
+  const n = tree.nodes[id]
+  if (!n) return tree
+  const gone = collectSubtree(tree, id)
+  const nodes: Record<string, FlowNode> = {}
+  for (const [k, v] of Object.entries(tree.nodes)) {
+    if (gone.has(k)) continue
+    nodes[k] = { ...v }
+  }
+  if (n.parent && nodes[n.parent]) {
+    nodes[n.parent] = {
+      ...nodes[n.parent],
+      children: (nodes[n.parent].children ?? []).filter((c) => c !== id),
+    }
+  }
+  return { ...tree, nodes }
 }
 
 // reconcileChildren rebuilds children lists from parent pointers, making the
@@ -189,4 +238,73 @@ export const NODE_LABELS: Record<string, string> = {
   catch: 'catch',
   'cache-set': '缓存',
   adapter: '转换',
+}
+
+// applyToolMutation replays a single agent tool event on a flow tree,
+// returning a new tree with the mutation applied (or the original tree
+// unchanged for read-only tools / non-mutating events).
+export function applyToolMutation(tree: FlowTree, ev: AgentEvent): FlowTree {
+  if (!ev.tool || !ev.result || typeof ev.result !== 'object') return tree
+
+  const result = ev.result as { ok?: boolean; data?: unknown; error?: string }
+  if (!result.ok || !result.data) return tree
+
+  switch (ev.tool) {
+    case 'create_node': {
+      const node = result.data as FlowNode
+      if (!node.id) return tree
+      const next: FlowTree = {
+        ...tree,
+        nodes: { ...tree.nodes, [node.id]: { ...node } },
+      }
+      // 若节点已有 parent（后端 AddChild 已设置），同步更新父的 children
+      if (node.parent && next.nodes[node.parent]) {
+        const parent = next.nodes[node.parent]
+        const existing = parent.children ?? []
+        if (!existing.includes(node.id)) {
+          next.nodes[node.parent] = { ...parent, children: [...existing, node.id] }
+        }
+      }
+      // cache-set 类型额外加入 cacheSets
+      if (node.type === 'cache-set') {
+        const cs = new Set(tree.cacheSets ?? [])
+        cs.add(node.id)
+        next.cacheSets = [...cs]
+      }
+      return next
+    }
+    case 'update_node': {
+      const node = result.data as FlowNode
+      if (!node.id || !tree.nodes[node.id]) return tree
+      return {
+        ...tree,
+        nodes: { ...tree.nodes, [node.id]: { ...node } },
+      }
+    }
+    case 'delete_node': {
+      const data = result.data as { deleted?: string }
+      if (!data.deleted) return tree
+      return deleteNode(tree, data.deleted)
+    }
+    case 'link_nodes': {
+      const data = result.data as { linked?: string[] }
+      if (!data.linked || data.linked.length !== 2) return tree
+      const [parentId, childId] = data.linked
+      if (!tree.nodes[parentId] || !tree.nodes[childId]) return tree
+      const next: FlowTree = {
+        ...tree,
+        nodes: { ...tree.nodes },
+      }
+      next.nodes[childId] = { ...next.nodes[childId], parent: parentId }
+      const parent = next.nodes[parentId]
+      const existing = parent.children ?? []
+      if (!existing.includes(childId)) {
+        next.nodes[parentId] = { ...parent, children: [...existing, childId] }
+      }
+      return next
+    }
+    default:
+      // 只读工具（get_flow, list_units, filter_units, validate_flow）不变异
+      return tree
+  }
 }

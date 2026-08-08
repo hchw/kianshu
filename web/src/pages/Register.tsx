@@ -2,9 +2,13 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { register } from '../api/auth'
 import { apiError } from '../api/client'
+import { BusyButton } from '../components/feedback/BusyButton'
+import { ErrorNote } from '../components/feedback/ErrorNote'
+import { useToast } from '../components/feedback/Toast'
 
 export default function Register() {
   const nav = useNavigate()
+  const toast = useToast()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -15,15 +19,19 @@ export default function Register() {
     e.preventDefault()
     setErr('')
     if (password !== confirm) {
-      setErr('两次密码不一致')
+      const msg = '两次密码不一致'
+      setErr(msg)
       return
     }
     setBusy(true)
     try {
       await register(username, password)
+      toast.success('注册成功,请登录')
       nav('/login')
     } catch (e) {
-      setErr(apiError(e))
+      const msg = apiError(e)
+      setErr(msg)
+      toast.error(msg)
     } finally {
       setBusy(false)
     }
@@ -53,10 +61,10 @@ export default function Register() {
           onChange={(e) => setConfirm(e.target.value)}
           autoComplete="new-password"
         />
-        {err && <p className="err">{err}</p>}
-        <button disabled={busy} type="submit">
+        {err && <ErrorNote>{err}</ErrorNote>}
+        <BusyButton type="submit" className="primary" busy={busy}>
           {busy ? '注册中…' : '注册'}
-        </button>
+        </BusyButton>
         <button type="button" className="link" onClick={() => nav('/login')}>
           已有账号?去登录
         </button>

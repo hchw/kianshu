@@ -128,8 +128,16 @@ func (s *Server) handleAgentSubmit(c *gin.Context) {
 		writeErr(c, http.StatusInternalServerError, "执行失败: "+err.Error())
 		return
 	}
-	if len(events) > 0 {
-		result.Events = events
+	// Only tool events belong in the aggregated JSON response; round/text
+	// frames are streaming-only progress signals.
+	toolEvents := events[:0]
+	for _, ev := range events {
+		if ev.Kind == "" || ev.Kind == service.EventKindTool {
+			toolEvents = append(toolEvents, ev)
+		}
+	}
+	if len(toolEvents) > 0 {
+		result.Events = toolEvents
 	}
 	writeJSON(c, http.StatusOK, result)
 }
@@ -137,7 +145,7 @@ func (s *Server) handleAgentSubmit(c *gin.Context) {
 // runAgent dispatches to generate or edit mode.
 func (s *Server) runAgent(c *gin.Context, flowID uint, req agentSubmitReq, provider service.ChatProvider, mode service.Mode, emit func(service.Event)) (*service.AgentResult, error) {
 	if mode == service.ModeGenerate {
-		return service.GenerateFlow(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Instruction, provider)
+		return service.GenerateFlow(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Instruction, provider, service.AgentHooks{Emit: emit})
 	}
 	return service.RunAgent(c.Request.Context(), s.DB, flowID, currentUserID(c), service.AgentOptions{
 		Provider:      provider,
