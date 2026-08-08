@@ -26,18 +26,16 @@ export function parseTree(json: string | null | undefined): FlowTree {
 
 // layoutTree places nodes on a level grid: level-order traversal assigns each
 // node x = layer*W and y = ordinal-in-layer*H. Nodes with explicit x/y
-// coordinates (user-placed) keep them and consume no grid slot. cache-set
-// nodes are laid out in a side column and never linked.
+// coordinates (user-placed) keep them and consume no grid slot.
 export function layoutTree(tree: FlowTree): LayoutResult {
   const positions = new Map<string, LayoutPosition>()
   const ordered: string[] = []
-  const isCache = new Set(tree.cacheSets ?? [])
 
   const inLayer: string[] = []
   const visited = new Set<string>()
   const counts = new Map<number, number>()
   const visit = (id: string, layer: number) => {
-    if (isCache.has(id) || visited.has(id)) return
+    if (visited.has(id)) return
     visited.add(id)
     ordered.push(id)
     inLayer.push(id)
@@ -59,26 +57,7 @@ export function layoutTree(tree: FlowTree): LayoutResult {
     }
   }
 
-  let side = 0
-  for (const id of isCache) {
-    const n = tree.nodes[id]
-    if (n && n.x != null && n.y != null) {
-      positions.set(id, { x: n.x, y: n.y, layer: -1 })
-    } else {
-      positions.set(id, { x: (maxLayer(positions) + 1) * W, y: side * H, layer: -1 })
-      side++
-    }
-    ordered.push(id)
-  }
   return { positions, ordered }
-}
-
-function maxLayer(positions: Map<string, LayoutPosition>): number {
-  let m = 0
-  for (const p of positions.values()) {
-    if (p.layer > m) m = p.layer
-  }
-  return m
 }
 
 // collectSubtree gathers id plus every descendant reachable through children.
@@ -141,7 +120,6 @@ export interface TreeError {
 export function validateTreeShape(tree: FlowTree): TreeError[] {
   reconcileChildren(tree)
   const errs: TreeError[] = []
-  const isCache = new Set(tree.cacheSets ?? [])
   const nodes = tree.nodes ?? {}
 
   if (!nodes[tree.start] || !nodes[tree.start]!.id) {
@@ -153,12 +131,6 @@ export function validateTreeShape(tree: FlowTree): TreeError[] {
       continue
     }
     if (id === tree.start) continue
-    if (isCache.has(id)) {
-      if (n.parent || (n.children && n.children.length > 0)) {
-        errs.push({ node_id: id, code: 'cache.linked', message: 'cache-set 节点不得参与树连线' })
-      }
-      continue
-    }
     if (!n.parent) {
       errs.push({ node_id: id, code: 'tree.no_parent', message: '非 start 节点缺少父节点' })
       continue
@@ -191,7 +163,7 @@ export function validateTreeShape(tree: FlowTree): TreeError[] {
     }
   }
   for (const id of Object.keys(nodes)) {
-    if (color.get(id) !== BLACK && !isCache.has(id)) {
+    if (color.get(id) !== BLACK) {
       errs.push({ node_id: id, code: 'tree.disconnected', message: '节点不属于 start 根树' })
     }
   }
@@ -207,11 +179,6 @@ export function linkAllowed(tree: FlowTree, parent: string, child: string): Tree
     return errs
   }
   const nodes = tree.nodes ?? {}
-  const isCache = new Set(tree.cacheSets ?? [])
-  if (isCache.has(parent) || isCache.has(child)) {
-    errs.push({ code: 'cache.linked', message: 'cache-set 节点不得参与连线' })
-    return errs
-  }
   if (!nodes[parent] || !nodes[child]) {
     errs.push({ code: 'link.missing', message: '节点不存在' })
     return errs
@@ -257,19 +224,12 @@ export function applyToolMutation(tree: FlowTree, ev: AgentEvent): FlowTree {
         ...tree,
         nodes: { ...tree.nodes, [node.id]: { ...node } },
       }
-      // 若节点已有 parent（后端 AddChild 已设置），同步更新父的 children
       if (node.parent && next.nodes[node.parent]) {
         const parent = next.nodes[node.parent]
         const existing = parent.children ?? []
         if (!existing.includes(node.id)) {
           next.nodes[node.parent] = { ...parent, children: [...existing, node.id] }
         }
-      }
-      // cache-set 类型额外加入 cacheSets
-      if (node.type === 'cache-set') {
-        const cs = new Set(tree.cacheSets ?? [])
-        cs.add(node.id)
-        next.cacheSets = [...cs]
       }
       return next
     }

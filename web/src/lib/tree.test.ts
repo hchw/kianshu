@@ -17,11 +17,10 @@ function sampleTree(): FlowTree {
     nodes: {
       n1: { id: 'n1', type: 'start', children: ['n2', 'n3'] },
       n2: { id: 'n2', type: 'api', parent: 'n1' },
-      n3: { id: 'n3', type: 'api', parent: 'n1', children: ['n4'] },
+      n3: { id: 'n3', type: 'api', parent: 'n1', children: ['n4', 'c1'] },
       n4: { id: 'n4', type: 'assert', parent: 'n3' },
-      c1: { id: 'c1', type: 'cache-set' },
+      c1: { id: 'c1', type: 'cache-set', parent: 'n3' },
     },
-    cacheSets: ['c1'],
   }
 }
 
@@ -50,10 +49,11 @@ describe('layoutTree', () => {
     expect(r.positions.get('n3')!.y).toBe(120)
   })
 
-  it('places cache-set nodes aside without linking', () => {
+  it('places cache-set nodes in tree', () => {
     const r = layoutTree(sampleTree())
+    // c1 is connected under n3, so it's at layer+1
     const c = r.positions.get('c1')!
-    expect(c.x).toBeGreaterThan(r.positions.get('n4')!.x)
+    expect(c.layer).toBe(2) // n3 children: n4 and c1 both at layer 2
     expect(r.ordered).toContain('c1')
   })
 
@@ -75,21 +75,6 @@ describe('layoutTree', () => {
     expect(r.positions.get('n4')!.x).toBe(520)
   })
 
-  it('keeps user-placed cache-set coordinates', () => {
-    const t: FlowTree = {
-      start: 'n1',
-      nodes: {
-        n1: { id: 'n1', type: 'start' },
-        c1: { id: 'c1', type: 'cache-set', x: 42, y: 43 },
-      },
-      cacheSets: ['c1'],
-    }
-    const r = layoutTree(t)
-    expect(r.positions.get('c1')).toEqual({ x: 42, y: 43, layer: -1 })
-  })
-})
-
-describe('validateTreeShape', () => {
   it('accepts a valid tree', () => {
     expect(validateTreeShape(sampleTree())).toEqual([])
   })
@@ -118,10 +103,10 @@ describe('validateTreeShape', () => {
     expect(validateTreeShape(t).some((e) => e.code === 'tree.disconnected')).toBe(true)
   })
 
-  it('rejects cache-set participation in links', () => {
+  it('allows cache-set in tree links', () => {
     const t = sampleTree()
-    t.nodes.c1.parent = 'n1'
-    expect(validateTreeShape(t).some((e) => e.code === 'cache.linked')).toBe(true)
+    // c1 already has parent=n3 from sampleTree, should be valid
+    expect(validateTreeShape(t).some((e) => e.code === 'cache.linked')).toBe(false)
   })
 })
 
@@ -144,8 +129,10 @@ describe('linkAllowed', () => {
     expect(linkAllowed(sampleTree(), 'n1', 'n1').some((e) => e.code === 'link.self')).toBe(true)
   })
 
-  it('rejects cache-set links', () => {
-    expect(linkAllowed(sampleTree(), 'n1', 'c1').some((e) => e.code === 'cache.linked')).toBe(true)
+  it('allows cache-set links', () => {
+    const t = sampleTree()
+    t.nodes.c2 = { id: 'c2', type: 'cache-set' }
+    expect(linkAllowed(t, 'n4', 'c2')).toEqual([])
   })
 
   it('rejects a second parent', () => {
@@ -185,7 +172,8 @@ describe('deleteNode', () => {
     const t = deleteNode(sampleTree(), 'n2')
     expect(t.nodes.n3).toBeDefined()
     expect(t.nodes.n4).toBeDefined()
-    expect(t.cacheSets).toEqual(['c1'])
+    // c1 is under n3, not affected by n2 deletion
+    expect(t.nodes.n3.children ?? []).toContain('c1')
   })
 })
 
@@ -219,20 +207,20 @@ describe('applyToolMutation', () => {
     expect(next.nodes.n2.children).toContain('n5')
   })
 
-  it('create_node adds cache-set to cacheSets', () => {
+  it('create_node adds cache-set to tree', () => {
     const ev = {
       kind: 'tool' as const,
       round: 1,
       tool: 'create_node',
       result: {
         ok: true,
-        data: { id: 'c2', type: 'cache-set' },
+        data: { id: 'c2', type: 'cache-set', parent: 'n2' },
       },
     }
     const next = applyToolMutation(base, ev)
     expect(next.nodes.c2).toBeDefined()
-    expect(next.cacheSets).toContain('c2')
-    expect(next.cacheSets).toContain('c1') // preserved
+    expect(next.nodes.c2!.type).toBe('cache-set')
+    expect(next.nodes.n2.children).toContain('c2')
   })
 
   it('update_node replaces existing node', () => {

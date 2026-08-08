@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github/hchw/kianshu/internal/model"
@@ -87,4 +88,73 @@ func unmarshalSessionMessages(s *model.FlowSession) ([]openai.Message, error) {
 		return nil, fmt.Errorf("解析会话消息失败: %w", err)
 	}
 	return msgs, nil
+}
+
+// CompressSession compacts a flow's dialog history by keeping the system
+// prompt, a summary of tool operations, and the last user message, dropping
+// the bulky intermediate tool call/result pairs to save tokens.
+func CompressSession(db *gorm.DB, flowID uint) (*model.FlowSession, error) {
+	s, err := GetFlowSession(db, flowID, 0)
+	if err != nil {
+		return nil, err
+	}
+	msgs, err := unmarshalSessionMessages(s)
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) <= 2 {
+		return s, nil // nothing to compress
+	}
+
+	// Collect tool operation summaries from the history.
+	var ops []string
+	for _, m := range msgs {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				ops = append(ops, tc.Function.Name)
+			}
+		}
+	}
+
+	// Rebuild: keep system, a compact summary, and the last user message.
+	compressed := []openai.Message{}
+	if len(msgs) > 0 && msgs[0].Role == "system" {
+		compressed = append(compressed, msgs[0])
+	}
+	if len(ops) > 0 {
+		summary := fmt.Sprintf("之前对话中执行了 %d 次工具调用（%s）。当前流草稿即这些操作的结果。请据此继续。",
+			len(ops), strings.Join(dedupeSlice(ops), ", "))
+		compressed = append(compressed, openai.Message{Role: "assistant", Content: &summary})
+	}
+	// 保留最后一条用户消息以维持上下文
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			compressed = append(compressed, msgs[i])
+			break
+		}
+	}
+
+	b, err := json.Marshal(compressed)
+	if err != nil {
+		return nil, err
+	}
+	s.Messages = string(b)
+	if err := db.Save(s).Error; err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// dedupeSlice removes consecutive duplicates from a string slice, preserving order.
+func dedupeSlice(xs []string) []string {
+	if len(xs) == 0 {
+		return xs
+	}
+	out := []string{xs[0]}
+	for _, x := range xs[1:] {
+		if x != out[len(out)-1] {
+			out = append(out, x)
+		}
+	}
+	return out
 }

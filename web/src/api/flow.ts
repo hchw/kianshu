@@ -23,7 +23,6 @@ export interface FlowNode {
 export interface FlowTree {
   start: string
   nodes: Record<string, FlowNode>
-  cacheSets?: string[]
 }
 
 export interface Draft {

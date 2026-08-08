@@ -67,14 +67,11 @@ func Validate(t *Tree, opts ValidatorOptions) Result {
 type cacheWrites map[string][]string
 
 // collectCacheWrites statically gathers every cache key written by any
-// cache-set node in the tree. cache-set nodes are off-link side channels, so
-// visibility is whole-tree static: a referenced key must be written by some
-// cache-set node (ordering is an execution-engine concern).
+// cache-set node in the tree by scanning all nodes for NodeCacheSet type.
 func (t *Tree) collectCacheWrites() cacheWrites {
 	writes := cacheWrites{}
-	for _, id := range t.CacheSets {
-		n, ok := t.Nodes[id]
-		if !ok || n == nil || n.Type != NodeCacheSet {
+	for id, n := range t.Nodes {
+		if n == nil || n.Type != NodeCacheSet {
 			continue
 		}
 		for _, k := range cacheSetWrites(n) {

@@ -80,10 +80,9 @@ type RunResult struct {
 // Cache-sets are off-link side channels: one executes lazily the moment a
 // node first reads a key it writes (evaluating its writes against the
 // reading node's parent output), so the design's token chain
-// (login api → cache-set → downstream $cache read) works; any cache-set
-// never read runs at the end with the start output as input so every
-// cache-set has a result. ctx may carry a deadline that bounds the whole run
-// (checked between nodes so non-network work also respects it).
+// with the start output as input so every cache-set has a result.
+// ctx may carry a deadline that bounds the whole run (checked between nodes
+// so non-network work also respects it).
 func Run(ctx context.Context, t *flow.Tree, opts Options) (*RunResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -96,13 +95,12 @@ func Run(ctx context.Context, t *flow.Tree, opts Options) (*RunResult, error) {
 		return nil, fmt.Errorf("缺少 start 根节点")
 	}
 	e := &engine{
-		tree:       t,
-		opts:       opts,
-		cache:      map[string]any{},
-		results:    map[string]*NodeResult{},
-		cacheSetRan: map[string]bool{},
+		tree:     t,
+		opts:     opts,
+		cache:    map[string]any{},
+		results:  map[string]*NodeResult{},
 		doneCatch:  map[string]bool{},
-		ctx:        ctx,
+		ctx:      ctx,
 	}
 	startOut, startErr := e.execute(start, nil)
 	if startErr != nil {
@@ -117,25 +115,6 @@ func Run(ctx context.Context, t *flow.Tree, opts Options) (*RunResult, error) {
 			status = StatusFailed
 		}
 	}
-	// Run any cache-set that no node read during the walk, so it still
-	// produces its full-cache result.
-	for _, csID := range t.CacheSets {
-		if e.cacheSetRan[csID] {
-			continue
-		}
-		cs, ok := t.Nodes[csID]
-		if !ok || cs == nil || cs.Type != flow.NodeCacheSet {
-			continue
-		}
-		in := asInputMap(startOut)
-		out, err := e.execute(cs, in)
-		if err != nil {
-			e.record(csID, StatusFailed, in, nil, err)
-			continue
-		}
-		e.record(csID, StatusOK, in, out, nil)
-		e.cacheSetRan[csID] = true
-	}
 	e.rootStatus = status
 	return &RunResult{Results: e.results, Cache: e.cache, Status: e.rootStatus}, nil
 }
@@ -147,7 +126,6 @@ type engine struct {
 	results     map[string]*NodeResult
 	iterCtx     map[string]any
 	rootStatus  Status
-	cacheSetRan map[string]bool
 	doneCatch   map[string]bool
 	ctx         context.Context
 }

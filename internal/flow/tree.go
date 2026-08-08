@@ -57,9 +57,8 @@ type Node struct {
 
 // Tree is the whole-tree JSON representation stored in drafts and versions.
 type Tree struct {
-	Start     string           `json:"start"`
-	Nodes     map[string]*Node `json:"nodes"`
-	CacheSets []string         `json:"cacheSets,omitempty"`
+	Start string           `json:"start"`
+	Nodes map[string]*Node `json:"nodes"`
 }
 
 // Config is the raw JSON config payload of a node. Typed accessors below
@@ -107,8 +106,7 @@ func (t *Tree) String() string {
 }
 
 // ValidateTreeShape checks the structural constraints that hold for every
-// tree: exactly one root (the start node), a single parent per node, no
-// cycles, and cache-set nodes kept out of the link structure.
+// tree: exactly one root (the start node), a single parent per node, and no cycles.
 func (t *Tree) ValidateTreeShape() []ValidationError {
 	// Reconcile the two link encodings: parent pointers are authoritative and
 	// children lists are derived from them, so clients may submit either.
@@ -125,23 +123,12 @@ func (t *Tree) ValidateTreeShape() []ValidationError {
 
 	// Structural sanity for each node, then reachability + cycle + single
 	// parent checks via a DFS from the start root following children.
-	// cache-set nodes are exempt: they participate without tree links.
-	isCacheSet := map[string]bool{}
-	for _, cs := range t.CacheSets {
-		isCacheSet[cs] = true
-	}
 	for id, n := range t.Nodes {
 		if n == nil {
 			errs = append(errs, ValidationError{NodeID: id, Code: "node.nil", Message: "节点为空"})
 			continue
 		}
 		if id == t.Start {
-			continue
-		}
-		if isCacheSet[id] {
-			if n.Parent != "" || len(n.Children) > 0 {
-				errs = append(errs, ValidationError{NodeID: id, Code: "cache.linked", Message: "cache-set 节点不得参与树连线"})
-			}
 			continue
 		}
 		if n.Parent == "" {
@@ -187,22 +174,7 @@ func (t *Tree) ValidateTreeShape() []ValidationError {
 	}
 	for id := range t.Nodes {
 		if _, ok := color[id]; !ok || color[id] != black {
-			if isCacheSet[id] {
-				continue
-			}
 			errs = append(errs, ValidationError{NodeID: id, Code: "tree.disconnected", Message: "节点不属于 start 根树"})
-		}
-	}
-
-	// cache-set nodes must not participate in parent/children links.
-	for _, cs := range t.CacheSets {
-		n, ok := t.Nodes[cs]
-		if !ok || n == nil {
-			errs = append(errs, ValidationError{NodeID: cs, Code: "cache.node_missing", Message: "cache-set 节点不存在"})
-			continue
-		}
-		if n.Parent != "" || len(n.Children) > 0 {
-			errs = append(errs, ValidationError{NodeID: cs, Code: "cache.linked", Message: "cache-set 节点不得参与树连线"})
 		}
 	}
 
