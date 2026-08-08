@@ -1,8 +1,10 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github/hchw/kianshu/internal/flow"
 	"github/hchw/kianshu/internal/model"
@@ -112,8 +114,84 @@ func DeleteFlow(db *gorm.DB, sched *ScheduleManager, flowID uint) error {
 	return nil
 }
 
+// swaggerParam is one parameter entry parsed from a unit's Params JSON array
+// (OpenAPI 2.0 format).
+type swaggerParam struct {
+	Name     string `json:"name"`
+	In       string `json:"in"`
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
+}
+
+// swaggerSchema is a JSON Schema subset extracted from a request_body.
+type swaggerSchema struct {
+	Type       string                    `json:"type"`
+	Properties map[string]swaggerSchema  `json:"properties"`
+	Required   []string                  `json:"required,omitempty"`
+}
+
+// deriveInputs parses a test unit's swagger params and request_body strings,
+// producing I/O key declarations. Auth-related keys (matched by isAuthKey)
+// are pre-wired to "$cache.token".
+func deriveInputs(unit model.TestUnit) map[string]flow.IOKey {
+	io := map[string]flow.IOKey{}
+
+	// 解析 params JSON 数组
+	if strings.TrimSpace(unit.Params) != "" && unit.Params != "null" {
+		var params []swaggerParam
+		if err := json.Unmarshal([]byte(unit.Params), &params); err != nil {
+			log.Warnf("deriveInputs: 解析 unit %d params 失败: %v", unit.ID, err)
+		} else {
+			for _, p := range params {
+				key := swaggerTypeToIO(p.Type)
+				src := ""
+				if isAuthKey(p.Name) {
+					src = "$cache.token"
+				}
+				io[p.Name] = flow.IOKey{Type: key, Source: src}
+			}
+		}
+	}
+
+	// 解析 request_body JSON schema
+	if strings.TrimSpace(unit.RequestBody) != "" && unit.RequestBody != "null" {
+		var schema swaggerSchema
+		if err := json.Unmarshal([]byte(unit.RequestBody), &schema); err != nil {
+			log.Warnf("deriveInputs: 解析 unit %d request_body 失败: %v", unit.ID, err)
+		} else {
+			for propName, prop := range schema.Properties {
+				// 跳过已存在的 key（params 优先）
+				if _, exists := io[propName]; exists {
+					continue
+				}
+				key := swaggerTypeToIO(prop.Type)
+				src := ""
+				if isAuthKey(propName) {
+					src = "$cache.token"
+				}
+				io[propName] = flow.IOKey{Type: key, Source: src}
+			}
+		}
+	}
+
+	return io
+}
+
+// swaggerTypeToIO maps a Swagger/OpenAPI type string to a flow IOType.
+func swaggerTypeToIO(t string) flow.IOType {
+	switch t {
+	case "object":
+		return flow.IOTypeObject
+	case "array":
+		return flow.IOTypeArray
+	default:
+		return flow.IOTypePrimitive
+	}
+}
+
 // SnapshotAPINodes redundantly snapshots the referenced test units into every
-// api node's config so a version is self-contained.
+// api node's config so a version is self-contained. It also auto-populates the
+// node's I/O contract (inputs) from the unit's swagger parameter definitions.
 func SnapshotAPINodes(db *gorm.DB, tree *flow.Tree) error {
 	for _, n := range tree.Nodes {
 		if n == nil || n.Type != flow.NodeAPI {
@@ -153,6 +231,21 @@ func SnapshotAPINodes(db *gorm.DB, tree *flow.Tree) error {
 			return err
 		}
 		n.Config = cfgJSON
+
+		// 自动填充 I/O 契约：从 Swagger 参数定义推导 inputs。
+		derived := deriveInputs(unit)
+		if len(derived) > 0 {
+			if len(n.Inputs) == 0 {
+				n.Inputs = derived
+			} else {
+				// 只追加 Swagger 中有但 inputs 中没有的 key，保护已有 source 不覆盖。
+				for k, v := range derived {
+					if _, exists := n.Inputs[k]; !exists {
+						n.Inputs[k] = v
+					}
+				}
+			}
+		}
 	}
 	return nil
 }

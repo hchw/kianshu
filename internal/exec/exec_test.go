@@ -311,8 +311,8 @@ func TestCacheWriteAndRead(t *testing.T) {
 	nodeCfg(t, tree.Nodes["n4"], map[string]any{"expr": `$.token`})
 	tree.Nodes["n4"].Inputs = map[string]flow.IOKey{"token": {Type: flow.IOTypePrimitive, Source: "$cache.token"}}
 	tree.AddChild("n1", "n2")
-	tree.AddChild("n2", "n4")
-	tree.CacheSets = []string{"n3"}
+	tree.AddChild("n2", "n3")
+	tree.AddChild("n2", "n4") // reader 是兄弟,非子节点,先写后读
 
 	res, _ := Run(context.Background(), tree, Options{
 		Host: "https://api.example.com",
@@ -337,7 +337,7 @@ func TestCacheIsolationBetweenRuns(t *testing.T) {
 		"n2": flow.NewNode("n2", flow.NodeCacheSet),
 	})
 	nodeCfg(t, tree.Nodes["n2"], map[string]any{"writes": map[string]any{"k": `$.v`}})
-	tree.CacheSets = []string{"n2"}
+	tree.AddChild("n1", "n2")
 
 	// Run 1 writes k=run1 to its run-scoped cache.
 	res1, _ := Run(context.Background(), tree, Options{StartParams: map[string]any{"v": "run1"}})
@@ -475,7 +475,7 @@ func TestCacheSetOutputsFullCache(t *testing.T) {
 		"n2": flow.NewNode("n2", flow.NodeCacheSet),
 	})
 	nodeCfg(t, tree.Nodes["n2"], map[string]any{"writes": map[string]any{"a": `"x"`, "b": `"y"`}})
-	tree.CacheSets = []string{"n2"}
+	tree.AddChild("n1", "n2")
 
 	res, _ := Run(context.Background(), tree, Options{StartParams: map[string]any{}})
 	out, _ := json.Marshal(res.Results["n2"].Output)
@@ -538,9 +538,9 @@ func TestLoopAggregatesMultipleChildren(t *testing.T) {
 	}
 }
 
-func TestBareCacheKeyTriggersLazyExecution(t *testing.T) {
-	// A node declares a cache key as its bare input key (no $cache. prefix).
-	// The read must still trigger the cache-set's lazy execution.
+func TestCacheSetProducerPush(t *testing.T) {
+	// cache-set runs as a tree node, writing to the shared cache before
+	// downstream nodes read from it.
 	tree := treeOf(map[string]*flow.Node{
 		"n1": flow.NewNode("n1", flow.NodeStart),
 		"n2": flow.NewNode("n2", flow.NodeCacheSet),
@@ -549,8 +549,8 @@ func TestBareCacheKeyTriggersLazyExecution(t *testing.T) {
 	nodeCfg(t, tree.Nodes["n2"], map[string]any{"writes": map[string]any{"token": `$.resp`}})
 	nodeCfg(t, tree.Nodes["n3"], map[string]any{"expr": `$.token`})
 	tree.Nodes["n3"].Inputs = map[string]flow.IOKey{"token": {Type: flow.IOTypePrimitive}}
-	tree.AddChild("n1", "n3")
-	tree.CacheSets = []string{"n2"}
+	tree.AddChild("n1", "n2")
+	tree.AddChild("n1", "n3") // reader 是兄弟,先写后读
 
 	res, _ := Run(context.Background(), tree, Options{
 		StartParams: map[string]any{"resp": "bare-token"},
@@ -565,6 +565,6 @@ func TestBareCacheKeyTriggersLazyExecution(t *testing.T) {
 		t.Fatalf("node output = %v, want bare-token", res.Results["n3"].Output)
 	}
 	if res.Results["n2"].Status != StatusOK {
-		t.Fatalf("cache-set should have run lazily, got %+v", res.Results["n2"])
+		t.Fatalf("cache-set should have run as tree node, got %+v", res.Results["n2"])
 	}
 }

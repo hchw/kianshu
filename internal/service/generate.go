@@ -52,7 +52,8 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 	contextMsg := fmt.Sprintf(
 		"测试集共 %d 个测试单元(unit_id=ID):\n%s当前流草稿:\n%s\n用户用例: %s\n\n"+
 			"请先分析是否存在需要用户决策的冲突:认证方式冲突(apikey↔token)、参数缺失(需要示例值)、业务步骤顺序不定、swagger 语义不清。"+
-			"若存在,先列出待确认问题(每行以 'Q: ' 开头);否则直接开始按固定顺序生成:启动→认证取token/写缓存→业务序列→断言→收尾。",
+			"若存在,先列出待确认问题(每行以 'Q: ' 开头);否则直接开始按固定顺序生成:启动→认证取token/写缓存→业务序列→断言→收尾。"+
+			"生成完成后必须用 update_node 给 start 节点写入 config.params(测试初值),覆盖下游所有 api 节点的业务参数。",
 		len(units), formatUnitBriefs(units), d.Tree, instruction)
 
 	// ② + ③ analyze + conflict detection via a tool-call-aware loop.
@@ -241,16 +242,46 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 	return res, nil
 }
 
-// formatUnitBriefs renders unit summaries compactly for the generation prompt.
+// formatUnitBriefs renders unit summaries compactly for the generation prompt,
+// including parameter summaries and auth info.
 func formatUnitBriefs(units []model.TestUnit) string {
 	out := ""
 	for _, u := range units {
-		out += fmt.Sprintf("- #%d %s %s (tag=%s, name=%s)\n", u.ID, u.Method, u.Path, u.Tag, u.Name)
+		auth := securityScheme(u.Security)
+		authLabel := ""
+		if auth != "" {
+			authLabel = ", auth=" + auth
+		}
+		paramSummary := paramBrief(u)
+		out += fmt.Sprintf("- #%d %s %s (tag=%s, name=%s%s)\n", u.ID, u.Method, u.Path, u.Tag, u.Name, authLabel)
+		if paramSummary != "" {
+			out += "  params: [" + paramSummary + "]\n"
+		}
 	}
 	if out == "" {
 		out = "(无)"
 	}
 	return out
+}
+
+// paramBrief extracts a compact parameter summary from a unit's swagger params.
+func paramBrief(u model.TestUnit) string {
+	if u.Params == "" || u.Params == "null" {
+		return ""
+	}
+	type p struct {
+		Name string `json:"name"`
+		In   string `json:"in"`
+	}
+	var params []p
+	if err := json.Unmarshal([]byte(u.Params), &params); err != nil {
+		return ""
+	}
+	parts := make([]string, 0, len(params))
+	for _, pp := range params {
+		parts = append(parts, pp.Name+"("+pp.In+")")
+	}
+	return strings.Join(parts, ", ")
 }
 
 // parsePauseQuestions extracts 'Q: ' lines the model raised during analysis.
@@ -335,13 +366,12 @@ func treeAuthScheme(tree *flow.Tree) string {
 		Writes map[string]string `json:"writes"`
 	}
 	tokenKeys := map[string]bool{}
-	for _, csID := range tree.CacheSets {
-		cs, ok := tree.Nodes[csID]
-		if !ok || cs == nil || cs.Type != flow.NodeCacheSet {
+	for _, n := range tree.Nodes {
+		if n == nil || n.Type != flow.NodeCacheSet {
 			continue
 		}
 		cfg.Writes = nil
-		_ = flow.UnmarshalConfig(cs, &cfg)
+		_ = flow.UnmarshalConfig(n, &cfg)
 		for k := range cfg.Writes {
 			if isAuthKey(k) {
 				tokenKeys[k] = true

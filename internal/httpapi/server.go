@@ -36,6 +36,9 @@ type Server struct {
 	// AgentLLM, when set, replaces the provider-bound chat client used by the
 	// agent endpoints (test injection hook).
 	AgentLLM service.ChatProvider
+	// AgentBus carries in-memory events of active agent runs so clients that
+	// reconnect (page refresh) can pick up missed events.
+	AgentBus *service.AgentEventBus
 }
 
 // New builds a Server and registers all routes.
@@ -54,6 +57,7 @@ func New(db *gorm.DB, cfg *config.Config) (*Server, error) {
 		Cipher:    cipher,
 		LLM:       openai.New(),
 		Schedules: service.NewScheduleManager(db, backend, cfg.ExecTimeout),
+		AgentBus:  service.NewAgentEventBus(),
 	}
 	return s, nil
 }
@@ -116,9 +120,11 @@ func (s *Server) Routes() *gin.Engine {
 		auth.DELETE("/flow/flows/:flowID/schedules/:scheduleID", s.handleDeleteSchedule)
 
 		auth.POST("/flow/flows/:flowID/agent/submit", s.handleAgentSubmit)
+		auth.GET("/flow/flows/:flowID/agent/subscribe", s.handleAgentSubscribe)
 		auth.GET("/flow/flows/:flowID/agent/session", s.handleAgentSession)
 		auth.POST("/flow/flows/:flowID/agent/resume", s.handleAgentResume)
 		auth.POST("/flow/flows/:flowID/agent/new", s.handleAgentNew)
+		auth.POST("/flow/flows/:flowID/agent/compress", s.handleAgentCompress)
 
 		auth.GET("/providers", s.handleListProviders)
 		auth.POST("/providers", s.handleCreateProvider)

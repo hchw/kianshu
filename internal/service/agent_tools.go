@@ -170,10 +170,7 @@ func execCreateNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 		ID: a.ID, Type: typ, Inputs: a.Inputs, Outputs: a.Outputs, Config: a.Config,
 	}
 	ctx.Tree.Nodes[a.ID] = node
-	// cache-set nodes are side-channel: they never take tree links.
-	if typ == flow.NodeCacheSet {
-		ctx.Tree.CacheSets = append(ctx.Tree.CacheSets, a.ID)
-	} else if a.Parent != "" {
+	if a.Parent != "" {
 		if _, ok := ctx.Tree.Nodes[a.Parent]; !ok {
 			return toolError("parent 必须是已存在节点的 id", "父节点不存在: %s", a.Parent)
 		}
@@ -239,7 +236,7 @@ func execDeleteNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 }
 
 // deleteSubtree removes a node and all of its descendants, cleaning up
-// children lists, cache-set registrations, and the scope.
+// children lists and the scope.
 func deleteSubtree(t *flow.Tree, node *flow.Node, scope map[string]bool) {
 	var collect []*flow.Node
 	var walk func(n *flow.Node)
@@ -259,11 +256,6 @@ func deleteSubtree(t *flow.Tree, node *flow.Node, scope map[string]bool) {
 		}
 		delete(t.Nodes, n.ID)
 		delete(scope, n.ID)
-	}
-	t.CacheSets = removeString(t.CacheSets, node.ID)
-	// If a cache-set descendant was removed, clean its registration too.
-	for _, n := range collect {
-		t.CacheSets = removeString(t.CacheSets, n.ID)
 	}
 	if parent != "" {
 		if _, ok := t.Nodes[parent]; !ok {
@@ -301,9 +293,6 @@ func execLinkNodes(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 	if a.Parent == a.Child {
 		return toolError("", "节点不能链接到自身")
 	}
-	if isCacheSetNode(ctx.Tree, a.Child) || isCacheSetNode(ctx.Tree, a.Parent) {
-		return toolError("cache-set 节点不得参与树连线", "cache-set 节点不得参与树连线")
-	}
 	if !inScope(ctx, a.Parent) || !inScope(ctx, a.Child) {
 		return toolError("", "parent/child 均需在本次勾选的修改范围内")
 	}
@@ -319,15 +308,6 @@ func execLinkNodes(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 		"child_io":  nodeIO(cn),
 		"linked":    []string{a.Parent, a.Child},
 	}}
-}
-
-func isCacheSetNode(t *flow.Tree, id string) bool {
-	for _, cs := range t.CacheSets {
-		if cs == id {
-			return true
-		}
-	}
-	return false
 }
 
 // nodeIO renders a node's input/output contracts for the LLM.

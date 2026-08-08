@@ -67,3 +67,65 @@ describe('NodePanel IO preservation', () => {
   })
 })
 
+describe('NodePanel auto-populated inputs', () => {
+  it('inputs with type and source (no desc) are readable', () => {
+    const tree: FlowTree = {
+      start: 'n1',
+      nodes: {
+        n1: {
+          id: 'n1',
+          type: 'api',
+          inputs: {
+            Authorization: { type: 'primitive', source: '$cache.token' },
+            id: { type: 'primitive' },
+          },
+        },
+      },
+    }
+    const n1 = tree.nodes.n1
+    expect(n1.inputs!.Authorization.type).toBe('primitive')
+    expect(n1.inputs!.Authorization.source).toBe('$cache.token')
+    expect(n1.inputs!.Authorization.desc).toBeUndefined()
+    expect(n1.inputs!.id.type).toBe('primitive')
+    expect(n1.inputs!.id.source).toBeUndefined()
+  })
+
+  it('empty inputs is handled without error', () => {
+    const tree: FlowTree = {
+      start: 'n1',
+      nodes: {
+        n1: {
+          id: 'n1',
+          type: 'api',
+          inputs: {},
+        },
+      },
+    }
+    const keys = Object.keys(tree.nodes.n1.inputs ?? {})
+    expect(keys).toHaveLength(0)
+  })
+
+  it('preserves auto-populated inputs structure on API nodes', () => {
+    const tree: FlowTree = {
+      start: 'n1',
+      nodes: {
+        n1: {
+          id: 'n1',
+          type: 'api',
+          inputs: {
+            Authorization: { type: 'primitive', source: '$cache.token' },
+            username: { type: 'primitive' },
+          },
+        },
+      },
+    }
+    // Auto-populated inputs are accessible directly from the node
+    const n1 = tree.nodes.n1
+    expect(n1.inputs!.Authorization.type).toBe('primitive')
+    expect(n1.inputs!.Authorization.source).toBe('$cache.token')
+    expect(n1.inputs!.username.type).toBe('primitive')
+    // Non-auth params have no source
+    expect(n1.inputs!.username.source).toBeUndefined()
+  })
+})
+

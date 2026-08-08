@@ -81,13 +81,12 @@ func TestTreeShape(t *testing.T) {
 		}
 	})
 
-	t.Run("cache-set excluded from links", func(t *testing.T) {
+	t.Run("cache-set participates in tree links", func(t *testing.T) {
 		tree := helperTree(t, func(tree *Tree) {
 			tree.Start = "s"
 			add(tree, "s", NodeStart)
 			cs := add(tree, "cs", NodeCacheSet)
 			cs.Parent = "s"
-			tree.CacheSets = []string{"cs"}
 		})
 		found := false
 		for _, e := range tree.ValidateTreeShape() {
@@ -95,8 +94,8 @@ func TestTreeShape(t *testing.T) {
 				found = true
 			}
 		}
-		if !found {
-			t.Fatal("expected cache.linked error")
+		if found {
+			t.Fatal("cache-set 现在可以参与树连线,不应报 cache.linked 错误")
 		}
 	})
 
@@ -165,16 +164,16 @@ func TestAuthHeader(t *testing.T) {
 		}
 	})
 
-	t.Run("auth key satisfied via cache-set", func(t *testing.T) {
+	t.Run("auth key satisfied via cache-set, reader not under it", func(t *testing.T) {
 		tree := helperTree(t, func(tree *Tree) {
 			tree.Start = "s"
 			add(tree, "s", NodeStart)
 			a := add(tree, "a", NodeAPI)
-			a.Inputs["authorization"] = IOKey{Type: IOTypePrimitive}
-			link(tree, "s", "a")
+			a.Inputs["authorization"] = IOKey{Type: IOTypePrimitive, Source: "$cache.authorization"}
 			cs := add(tree, "cs", NodeCacheSet)
 			cs.Config = mustConfig(map[string]any{"writes": map[string]string{"authorization": "$.token"}})
-			tree.CacheSets = []string{"cs"}
+			link(tree, "s", "cs")
+			link(tree, "s", "a") // reader 不在 cache-set 下方，并列即可
 		})
 		res := Validate(tree, ValidatorOptions{})
 		if res.HasErrors() {
@@ -223,10 +222,10 @@ func TestTryCatch(t *testing.T) {
 			link(tree, "tr", "tr2")
 			api := add(tree, "api", NodeAPI)
 			api.Inputs["authorization"] = IOKey{Type: IOTypePrimitive}
-			link(tree, "tr2", "api")
 			cs := add(tree, "cs", NodeCacheSet)
 			cs.Config = mustConfig(map[string]any{"writes": map[string]string{"authorization": "$.token"}})
-			tree.CacheSets = []string{"cs"}
+			link(tree, "tr2", "cs")
+			link(tree, "cs", "api")
 		})
 		res := Validate(tree, ValidatorOptions{})
 		if res.HasErrors() {
@@ -338,7 +337,7 @@ func TestCacheStaticVisibility(t *testing.T) {
 			// no cache-set node writes "token"
 			cs := add(tree, "cs", NodeCacheSet)
 			cs.Config = mustConfig(map[string]any{"writes": map[string]string{"other": "$.x"}})
-			tree.CacheSets = []string{"cs"}
+			link(tree, "s", "cs")
 		})
 		res := Validate(tree, ValidatorOptions{})
 		if !hasCode(res, "contract.cache_source_missing") {
@@ -352,10 +351,10 @@ func TestCacheStaticVisibility(t *testing.T) {
 			add(tree, "s", NodeStart)
 			cs := add(tree, "cs", NodeCacheSet)
 			cs.Config = mustConfig(map[string]any{"writes": map[string]string{"token": "$.token"}})
-			tree.CacheSets = []string{"cs"}
 			api := add(tree, "api", NodeAPI)
 			api.Inputs["authorization"] = IOKey{Type: IOTypePrimitive, Source: "$cache.token"}
-			link(tree, "s", "api")
+			link(tree, "s", "cs")
+			link(tree, "s", "api") // reader 不必在 cache-set 下方
 		})
 		res := Validate(tree, ValidatorOptions{})
 		if res.HasErrors() {
@@ -369,10 +368,10 @@ func TestCacheStaticVisibility(t *testing.T) {
 			add(tree, "s", NodeStart)
 			cs := add(tree, "cs", NodeCacheSet)
 			cs.Config = mustConfig(map[string]any{"writes": map[string]string{"token": "$.token"}})
-			tree.CacheSets = []string{"cs"}
 			api := add(tree, "api", NodeAPI)
 			api.Inputs["token"] = IOKey{Type: IOTypePrimitive}
-			link(tree, "s", "api")
+			link(tree, "s", "cs")
+			link(tree, "s", "api") // bare-key reader 也不必在 cache-set 下方
 		})
 		res := Validate(tree, ValidatorOptions{})
 		if res.HasErrors() {

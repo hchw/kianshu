@@ -266,22 +266,14 @@ func toSlice(v any) []any {
 // contract: explicit $cache.source, an ancestor output key, or a bare key
 // name found in an ancestor's output, the shared cache, or the current loop
 // iteration context. A node that declares no input keys consumes its
-// parent's output directly (chain semantics). A cache key that no cache-set
-// has written yet triggers that cache-set lazily with the current parent
-// output as its input, so the "login api → cache-set → downstream $cache
-// read" chain works even though cache-sets participate in no tree links.
+// parent's output directly (chain semantics). Cache-set nodes now participate
+// in the tree: they write to the shared cache when they execute, and
+// downstream nodes read from it directly.
 func (e *engine) resolveInputs(n *flow.Node, parentOut any) any {
 	if len(n.Inputs) == 0 {
 		return parentOut
 	}
 	resolved := map[string]any{}
-	// Collect ancestor outputs (by ancestor id) for key lookup.
-	ancOutputs := map[string]any{}
-	for _, a := range e.tree.Ancestors(n.ID) {
-		if r, ok := e.results[a]; ok && r.Output != nil {
-			ancOutputs[a] = r.Output
-		}
-	}
 	// Flatten ancestor outputs that are flat maps into the resolution scope.
 	ancestorScope := map[string]any{}
 	for _, a := range e.tree.Ancestors(n.ID) {
@@ -297,38 +289,10 @@ func (e *engine) resolveInputs(n *flow.Node, parentOut any) any {
 			}
 		}
 	}
-	// ensureCache runs the first cache-set that writes key and has not run
-	// yet, with the current parent output as its input.
-	ensureCache := func(key string) {
-		if _, ok := e.cache[key]; ok {
-			return
-		}
-		for _, csID := range e.tree.CacheSets {
-			if e.cacheSetRan[csID] {
-				continue
-			}
-			cs, ok := e.tree.Nodes[csID]
-			if !ok || cs == nil || cs.Type != flow.NodeCacheSet {
-				continue
-			}
-			if !e.cacheSetWrites(cs, key) {
-				continue
-			}
-			e.cacheSetRan[csID] = true
-			in := asInputMap(parentOut)
-			out, err := e.execute(cs, in)
-			if err != nil {
-				e.record(csID, StatusFailed, in, nil, err)
-				continue
-			}
-			e.record(csID, StatusOK, in, out, nil)
-		}
-	}
 	for key, io := range n.Inputs {
 		switch {
 		case io.Source != "":
 			if ck, ok := flow.CacheKey(io.Source); ok {
-				ensureCache(ck)
 				if v, ok := e.cache[ck]; ok {
 					resolved[key] = v
 				}
@@ -344,13 +308,6 @@ func (e *engine) resolveInputs(n *flow.Node, parentOut any) any {
 				resolved[key] = v
 			} else if v, ok := e.iterCtx[key]; ok {
 				resolved[key] = v
-			} else {
-				// A bare key naming a cache-set write key (no $cache. prefix)
-				// still triggers its lazy execution, matching validation.
-				ensureCache(key)
-				if v, ok := e.cache[key]; ok {
-					resolved[key] = v
-				}
 			}
 		}
 	}
@@ -363,16 +320,4 @@ func (e *engine) resolveInputs(n *flow.Node, parentOut any) any {
 		}
 	}
 	return resolved
-}
-
-// cacheSetWrites reports whether the cache-set's config writes the given key.
-func (e *engine) cacheSetWrites(n *flow.Node, key string) bool {
-	var cfg struct {
-		Writes map[string]string `json:"writes"`
-	}
-	if err := flow.UnmarshalConfig(n, &cfg); err != nil {
-		return false
-	}
-	_, ok := cfg.Writes[key]
-	return ok
 }

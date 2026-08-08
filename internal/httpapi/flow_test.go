@@ -129,8 +129,8 @@ func TestFlowLifecycle(t *testing.T) {
 	tree := `{"start":"n1","nodes":{
 	  "n1":{"id":"n1","type":"start","outputs":{"token":{"type":"primitive"}},"config":{"params":{"account":"a","password":"p"}}},
 	  "n2":{"id":"n2","type":"api","parent":"n1","inputs":{"authorization":{"type":"primitive"}},"outputs":{"data":{"type":"object"}},"config":{"unit_id":0}},
-	  "cs1":{"id":"cs1","type":"cache-set","inputs":{},"outputs":{},"config":{"writes":{"authorization":"$.token"}}}
-	},"cacheSets":["cs1"]}`
+	  "cs1":{"id":"cs1","type":"cache-set","parent":"n2","inputs":{},"outputs":{},"config":{"writes":{"authorization":"$.token"}}}
+	}}`
 	_, updated := c.do("PUT", fmt.Sprintf("/api/flow/flows/%d/draft", flowID),
 		fmt.Sprintf(`{"name":"my flow","tree":%s}`, mustJSON(t, tree)), http.StatusOK)
 	_ = updated

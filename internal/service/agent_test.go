@@ -372,10 +372,9 @@ func TestGenerateFlowDetectsAuthConflictWithoutQLine(t *testing.T) {
 	tree := &flow.Tree{
 		Start: "n1",
 		Nodes: map[string]*flow.Node{
-			"n1": flow.NewNode("n1", flow.NodeStart),
-			"n2": flow.NewNode("n2", flow.NodeAPI),
+			"n1":  flow.NewNode("n1", flow.NodeStart),
+			"n2":  flow.NewNode("n2", flow.NodeAPI),
 		},
-		CacheSets: []string{"cs1"},
 	}
 	csCfg, err := flow.MarshalConfig(map[string]any{"writes": map[string]string{"token": "$.token"}})
 	if err != nil {
@@ -383,6 +382,9 @@ func TestGenerateFlowDetectsAuthConflictWithoutQLine(t *testing.T) {
 	}
 	tree.Nodes["cs1"] = flow.NewNode("cs1", flow.NodeCacheSet)
 	tree.Nodes["cs1"].Config = csCfg
+	tree.Nodes["cs1"].Parent = "n1"
+	tree.Nodes["n1"].Children = []string{"cs1"}
+	tree.Nodes["n2"].Parent = "cs1"
 	tree.Nodes["n2"].Inputs = map[string]flow.IOKey{
 		"authorization": {Type: flow.IOTypePrimitive, Source: "$cache.token"},
 	}
@@ -594,5 +596,56 @@ func TestGenerateFlowStreamsAnalysis(t *testing.T) {
 	// The pause event carries the analysis round number.
 	if len(res.Events) != 1 || res.Events[0].Round != 1 {
 		t.Fatalf("expected pause event at round 1, got %+v", res.Events)
+	}
+}
+
+func TestSystemPromptContainsRoleAndPrinciples(t *testing.T) {
+	p := systemPrompt(ModeEdit)
+	if !strings.Contains(p, "测试流程编排专家") {
+		t.Fatalf("system prompt should declare 测试流程编排专家 role")
+	}
+	if !strings.Contains(p, "不耻下问") {
+		t.Fatalf("system prompt should contain 不耻下问 principle")
+	}
+	if !strings.Contains(p, "边界覆盖") {
+		t.Fatalf("system prompt should contain 边界覆盖 principle")
+	}
+	if !strings.Contains(p, "数据流显式化") {
+		t.Fatalf("system prompt should contain 数据流显式化 principle")
+	}
+	if !strings.Contains(p, "生成后自检") {
+		t.Fatalf("system prompt should contain 生成后自检 principle")
+	}
+	if !strings.Contains(p, "生死之战") {
+		t.Fatalf("system prompt should contain competitive urgency")
+	}
+	if !strings.Contains(p, "$cache.token") {
+		t.Fatalf("system prompt should mention $cache.token for auth inputs")
+	}
+}
+
+func TestSystemPromptGenerateMode(t *testing.T) {
+	p := systemPrompt(ModeGenerate)
+	if !strings.Contains(p, "启动 → 认证") {
+		t.Fatalf("generate mode should include template order")
+	}
+}
+
+func TestToolCreateNodeDescription(t *testing.T) {
+	schemas := toolSchemas()
+	var desc string
+	for _, ts := range schemas {
+		if ts.Function.Name == toolCreateNode {
+			desc = ts.Function.Description
+		}
+	}
+	if desc == "" {
+		t.Fatal("create_node tool not found")
+	}
+	if !strings.Contains(desc, "inputs") {
+		t.Fatalf("create_node description should mention inputs: %q", desc)
+	}
+	if !strings.Contains(desc, "config.params") {
+		t.Fatalf("create_node description should mention config.params: %q", desc)
 	}
 }

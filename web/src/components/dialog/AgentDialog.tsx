@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentEvent, AgentSession, PauseAnswer, PauseQuestion } from '../../api/agent'
-import { agentNew, agentResume, agentSession } from '../../api/agent'
+import { agentCompress, agentNew, agentResume, agentSession } from '../../api/agent'
 import { apiError } from '../../api/client'
 import type { FlowTree } from '../../api/flow'
 import type { Provider } from '../../api/providers'
@@ -32,6 +32,7 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [questions, setQuestions] = useState<PauseQuestion[]>([])
+  const [answers, setAnswers] = useState<Record<string, string>>({})
   const [status, setStatus] = useState('active')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -42,6 +43,13 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
   const liveTextRef = useRef('')
   const abortRef = useRef<{ abort: () => void } | null>(null)
   const boxRef = useRef<HTMLDivElement>(null)
+  const subRef = useRef<{ abort: () => void } | null>(null)
+  const treeRef = useRef(tree)
+  treeRef.current = tree
+  const onChangedRef = useRef(onChanged)
+  onChangedRef.current = onChanged
+  const onTreePreviewRef = useRef(onTreePreview)
+  onTreePreviewRef.current = onTreePreview
 
   useEffect(() => {
     setProviderID((cur) => cur || providers[0]?.id || 0)
@@ -51,15 +59,92 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
     try {
       const s = await agentSession(flowID)
       setSession(s)
+      return s
     } catch (e) {
       setErr(apiError(e))
+      return null
     }
   }, [flowID])
 
+  // 订阅正在运行中的 agent 事件流（页面刷新后断线重连）
+  const subscribeRun = useCallback(() => {
+    subRef.current?.abort()
+    const url = `/api/flow/flows/${flowID}/agent/subscribe?since=0`
+    // 深克隆当前树作为快照
+    let workingTree: FlowTree = JSON.parse(JSON.stringify(treeRef.current))
+    const snapshot = workingTree
+
+    subRef.current = openSSE(url, {}, {
+      onEvent: (ev) => {
+        if (ev.kind === 'round') {
+          liveRoundRef.current = ev.round
+          liveTextRef.current = ''
+          setLiveRound(ev.round)
+          setLiveText('')
+        } else if (ev.kind === 'text') {
+          liveTextRef.current += ev.text ?? ''
+          if (liveRoundRef.current != null) {
+            setLiveRound(liveRoundRef.current)
+            setLiveText(liveTextRef.current)
+          }
+        } else {
+          if (liveRoundRef.current != null && liveTextRef.current) {
+            setRoundTexts((r) => ({ ...r, [liveRoundRef.current!]: liveTextRef.current }))
+          }
+          liveRoundRef.current = null
+          liveTextRef.current = ''
+          setLiveRound(null)
+          setLiveText('')
+          setEvents((cur) => [...cur, ev])
+          if (ev.tool && ev.result) {
+            const next = applyToolMutation(workingTree, ev)
+            if (next !== workingTree) {
+              workingTree = next
+              onTreePreviewRef.current(next)
+            }
+          }
+        }
+        scrollBottom()
+      },
+      onDone: async () => {
+        setLiveRound(null)
+        setLiveText('')
+        liveRoundRef.current = null
+        liveTextRef.current = ''
+        await refreshSession()
+        onChangedRef.current()
+      },
+      onError: (msg) => {
+        setErr(msg)
+        onTreePreviewRef.current(snapshot)
+      },
+      onDisconnect: () => {
+        // 连接中断但运行可能还在继续，尝试刷新会话
+        refreshSession()
+      },
+      onAbort: () => {
+        setLiveRound(null)
+        setLiveText('')
+        liveRoundRef.current = null
+        liveTextRef.current = ''
+      },
+    })
+  }, [flowID, refreshSession])
+
   useEffect(() => {
-    refreshSession()
-    return () => abortRef.current?.abort()
-  }, [refreshSession])
+    const init = async () => {
+      const s = await refreshSession()
+      // 如果会话正在运行中（页面刷新后），自动重连 SSE
+      if (s && s.status === 'active' && s.messages && (s.messages as Message[]).length > 0) {
+        subscribeRun()
+      }
+    }
+    init()
+    return () => {
+      abortRef.current?.abort()
+      subRef.current?.abort()
+    }
+  }, [refreshSession, subscribeRun])
 
   const setSession = (s: AgentSession) => {
     setStatus(s.status)
@@ -199,6 +284,17 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
     }
   }
 
+  const compressSession = async () => {
+    if (!confirm('压缩会话历史将保留系统提示和操作摘要,去除冗余的工具调用记录以节省 token。继续?')) return
+    try {
+      await agentCompress(flowID)
+      await refreshSession()
+      setEvents([])
+    } catch (e) {
+      setErr(apiError(e))
+    }
+  }
+
   const nodeIDs = Object.keys(tree.nodes ?? {})
 
   return (
@@ -296,39 +392,58 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
           </div>
         )}
       </div>
+      <div className="row tight">
+        <button className="link" onClick={compressSession} disabled={busy}>
+          压缩对话
+        </button>
+      </div>
       {status === 'paused' && questions.length > 0 && (
         <div className="card sub">
           <div className="strong">需要确认</div>
           {questions.map((q) => (
-            <QuestionRow key={q.id} q={q} onSubmit={(a) => resume([{ question_id: q.id, answer: a }])} />
+            <div key={q.id} className="stack">
+              <div className="muted">
+                {q.type}: {q.question}
+              </div>
+              {q.options?.length ? (
+                <div className="node-tags">
+                  {q.options.map((o) => (
+                    <button
+                      key={o}
+                      className={answers[q.id] === o ? 'tag on' : 'tag'}
+                      onClick={() => setAnswers((a) => ({ ...a, [q.id]: o }))}
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <input
+                  value={answers[q.id] ?? ''}
+                  onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                  placeholder="回答"
+                />
+              )}
+            </div>
           ))}
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() => {
+              const ans: PauseAnswer[] = questions
+                .filter((q) => answers[q.id]?.trim())
+                .map((q) => ({ question_id: q.id, answer: answers[q.id].trim() }))
+              if (ans.length === 0) return
+              resume(ans)
+              setAnswers({})
+            }}
+          >
+            {busy ? '提交中…' : '提交全部回答'}
+          </button>
         </div>
       )}
     </div>
   )
 }
 
-function QuestionRow({ q, onSubmit }: { q: PauseQuestion; onSubmit: (answer: string) => void }) {
-  const [answer, setAnswer] = useState('')
-  return (
-    <div className="stack">
-      <div className="muted">
-        {q.type}: {q.question}
-      </div>
-      {q.options?.length ? (
-        <div className="node-tags">
-          {q.options.map((o) => (
-            <button key={o} className="tag" onClick={() => onSubmit(o)}>
-              {o}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="row tight">
-          <input value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="回答" />
-          <button onClick={() => onSubmit(answer)}>提交</button>
-        </div>
-      )}
-    </div>
-  )
-}
+

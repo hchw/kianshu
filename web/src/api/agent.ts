@@ -64,3 +64,8 @@ export async function agentNew(flowID: number) {
   const { data } = await api.post(`/flow/flows/${flowID}/agent/new`)
   return data
 }
+
+export async function agentCompress(flowID: number) {
+  const { data } = await api.post(`/flow/flows/${flowID}/agent/compress`)
+  return data
+}

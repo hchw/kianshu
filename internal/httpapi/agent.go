@@ -160,6 +160,7 @@ func (s *Server) runAgent(c *gin.Context, flowID uint, req agentSubmitReq, provi
 // loop runs in a goroutine that watches c.Request.Context(): when the client
 // disconnects the loop stops promptly, event sends never block on a closed
 // stream, and the session lock is released only after the loop truly ends.
+// Events are also pushed to the AgentBus so reconnecting clients can catch up.
 func (s *Server) submitSSE(c *gin.Context, flowID uint, req agentSubmitReq, provider service.ChatProvider, mode service.Mode, unlock func()) {
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -171,7 +172,9 @@ func (s *Server) submitSSE(c *gin.Context, flowID uint, req agentSubmitReq, prov
 	done := make(chan error, 1)
 	go func() {
 		defer unlock()
+		defer s.AgentBus.MarkDone(flowID)
 		_, err := s.runAgent(c, flowID, req, provider, mode, func(ev service.Event) {
+			s.AgentBus.Push(flowID, ev)
 			select {
 			case stream <- ev:
 			case <-ctx.Done():
@@ -214,6 +217,73 @@ func jsonString(v any) string {
 		return ""
 	}
 	return string(b)
+}
+
+// handleAgentSubscribe streams events of an active agent run so a client that
+// lost its original SSE connection (page refresh) can resume receiving events.
+//
+//	@Summary	订阅 Agent 运行事件（断线重连）
+//	@Description	当页面刷新后原 SSE 连接断开时，通过此端点重新接收正在运行的 Agent 事件。需要读权限。
+//	@Tags		LLM Agent
+//	@Produce	text/event-stream
+//	@Security	BearerAuth
+//	@Param		flowID	path	uint	true	"流 ID"
+//	@Param		since	query	int	false	"从第几条事件开始（默认0）"
+//	@Success	200	{string}	string	"SSE 事件流"
+//	@Failure	400	{object}	errorResp	"无效的流 ID"
+//	@Failure	403	{object}	errorResp	"无权访问该流"
+//	@Router		/flow/flows/{flowID}/agent/subscribe [get]
+func (s *Server) handleAgentSubscribe(c *gin.Context) {
+	flowID, _, ok := s.flowReadable(c)
+	if !ok {
+		return
+	}
+	since := 0
+	if s := c.Query("since"); s != "" {
+		if n, err := parseIDRaw(s); err == nil {
+			since = n
+		}
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Flush()
+
+	ctx := c.Request.Context()
+	s.AgentBus.Subscribe(flowID, since, func(batch []service.Event) {
+		for _, ev := range batch {
+			data, _ := json.Marshal(ev)
+			// c.Stream handles client disconnect; if the client is gone this
+			// write becomes a no-op (or fails silently).
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			c.Writer.Write([]byte("data: " + string(data) + "\n\n"))
+			c.Writer.Flush()
+		}
+	}, ctx.Done())
+
+	// Run finished; send [DONE].
+	select {
+	case <-ctx.Done():
+	default:
+		io.WriteString(c.Writer, "data: [DONE]\n\n")
+		c.Writer.Flush()
+	}
+}
+
+func parseIDRaw(s string) (int, error) {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, errors.New("not a number")
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, nil
 }
 
 // handleAgentSession returns the dialog state of a flow.
@@ -318,6 +388,33 @@ func (s *Server) handleAgentNew(c *gin.Context) {
 	sess, err := service.ResetFlowSession(s.DB, flowID)
 	if err != nil {
 		writeErr(c, http.StatusInternalServerError, "重置会话失败")
+		return
+	}
+	writeJSON(c, http.StatusOK, gin.H{"ok": true, "session_id": sess.ID})
+}
+
+// handleAgentCompress compacts a flow's dialog history to save tokens for
+// subsequent editing rounds.
+//
+//	@Summary	压缩 Agent 会话历史
+//	@Description	压缩流的 LLM 会话历史,保留系统提示、操作摘要和最后一条用户消息,去除冗余的工具调用/结果以节省 token。需要编辑权限。
+//	@Tags		LLM Agent
+//	@Produce	json
+//	@Security	BearerAuth
+//	@Param		flowID	path	uint	true	"流 ID"
+//	@Success	200	{object}	agentNewResp	"压缩完成"
+//	@Failure	400	{object}	errorResp	"无效的流 ID"
+//	@Failure	403	{object}	errorResp	"无编辑权限"
+//	@Failure	500	{object}	errorResp	"压缩会话失败"
+//	@Router		/flow/flows/{flowID}/agent/compress [post]
+func (s *Server) handleAgentCompress(c *gin.Context) {
+	flowID, _, ok := s.flowEditable(c)
+	if !ok {
+		return
+	}
+	sess, err := service.CompressSession(s.DB, flowID)
+	if err != nil {
+		writeErr(c, http.StatusInternalServerError, "压缩会话失败")
 		return
 	}
 	writeJSON(c, http.StatusOK, gin.H{"ok": true, "session_id": sess.ID})
