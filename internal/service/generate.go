@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github/hchw/kianshu/internal/flow"
 	"github/hchw/kianshu/internal/model"
@@ -32,7 +33,12 @@ type PauseAnswer struct {
 // GenerateFlow runs the fixed generation workflow (D6): intent -> filter ->
 // analyze -> conflict detection -> pause -> fixed-order generation -> validate
 // -> land draft. Conflicts stop the run at a pause point awaiting answers.
-func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruction string, provider ChatProvider) (*AgentResult, error) {
+// Optional hooks stream analysis rounds (LLM 回馈文本与轮次) in real time.
+func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruction string, provider ChatProvider, hooks ...AgentHooks) (*AgentResult, error) {
+	h := AgentHooks{}
+	if len(hooks) > 0 {
+		h = hooks[0]
+	}
 	// ① Collect intent: units + existing flow become the generation context.
 	tsID := flowTestSetID(db, flowID)
 	units, err := listUnitsQuery(db, tsID, "", "")
@@ -63,20 +69,38 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 		return nil, err
 	}
 	toolCtx := &ToolContext{DB: db, TestSetID: tsID, Tree: tree}
-	req := openai.CompletionRequest{
-		Model:    provider.GetModel(),
-		Messages: append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...),
-		Tools:    toolSchemas(),
-	}
+	req := newAgentCompletionRequest(provider.GetModel(), append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...))
+	req.Tools = toolSchemas()
 	req.Messages = append(req.Messages, openai.Message{Role: "user", Content: strPtr(contextMsg)})
 
 	const maxAnalysisRounds = 5
 	var analysis openai.Message
+	analysisRounds := 0
 	for round := 1; round <= maxAnalysisRounds; round++ {
-		resp, err := provider.ChatCompletion(ctx, provider, req)
-		if err != nil {
-			log.Errorf("agent: generate flow=%d analysis round=%d LLM 调用失败: %v", flowID, round, err)
-			return nil, err
+		analysisRounds = round
+		h.emit(Event{Kind: EventKindRound, Round: round})
+
+		// 3 次重试应对瞬态失败
+		var resp *openai.CompletionResponse
+		var lastErr error
+		for retry := 0; retry < 3; retry++ {
+			resp, lastErr = generateComplete(ctx, provider, req, func(text string) {
+				h.emit(Event{Kind: EventKindText, Round: round, Text: text})
+			})
+			if lastErr == nil {
+				break
+			}
+			if ctx.Err() != nil {
+				break
+			}
+			if retry < 2 {
+				log.Warnf("agent: generate flow=%d analysis round=%d LLM 调用失败(第%d次重试): %v", flowID, round, retry+1, lastErr)
+				time.Sleep(time.Duration(retry+1) * 2 * time.Second)
+			}
+		}
+		if lastErr != nil {
+			log.Errorf("agent: generate flow=%d analysis round=%d LLM 调用失败(已重试3次): %v", flowID, round, lastErr)
+			return nil, lastErr
 		}
 		analysis = resp.Choices[0].Message
 		req.Messages = append(req.Messages, analysis)
@@ -89,6 +113,7 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 			log.Infof("agent: generate flow=%d analysis round=%d tool=%s args=%s", flowID, round, tc.Function.Name, tc.Function.Arguments)
 			result := ExecTool(toolCtx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 			log.Infof("agent: generate flow=%d analysis round=%d tool=%s 结果 ok=%v err=%s", flowID, round, tc.Function.Name, result.OK, result.Error)
+			h.emit(Event{Kind: EventKindTool, Round: round, Tool: tc.Function.Name, Args: tc.Function.Arguments, Result: result})
 			req.Messages = append(req.Messages, openai.Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
@@ -115,11 +140,11 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 			return nil, err
 		}
 		return &AgentResult{
-			Rounds:   1,
+			Rounds:   analysisRounds,
 			Finished: false,
 			Message:  "生成已暂停,需要用户确认以下问题",
 			Events: []Event{{
-				Round: 1, Tool: "analyze",
+				Kind: EventKindTool, Round: analysisRounds, Tool: "analyze",
 				Result: map[string]any{"paused": true, "questions": questions},
 			}},
 		}, nil
@@ -137,7 +162,19 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 		Instruction:    instruction,
 		Mode:           ModeGenerate,
 		PresetMessages: req.Messages[1:],
+		Emit:           h.Emit,
+		StartRound:     analysisRounds + 1,
 	})
+}
+
+// generateComplete calls the provider for the analysis phase, preferring
+// streaming when available so the model's feedback reaches the client in real
+// time.
+func generateComplete(ctx context.Context, p ChatProvider, req openai.CompletionRequest, onText func(string)) (*openai.CompletionResponse, error) {
+	if sp, ok := p.(StreamingProvider); ok {
+		return sp.StreamChatCompletion(ctx, p, req, onText)
+	}
+	return p.ChatCompletion(ctx, p, req)
 }
 
 // ResumeGeneration continues a paused generation with the user's answers. Each
@@ -152,11 +189,8 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 	if err != nil {
 		return nil, err
 	}
-	req := openai.CompletionRequest{
-		Model:    provider.GetModel(),
-		Messages: append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...),
-		Tools:    toolSchemas(),
-	}
+	req := newAgentCompletionRequest(provider.GetModel(), append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...))
+	req.Tools = toolSchemas()
 
 	answered := map[string]string{}
 	for _, a := range answers {

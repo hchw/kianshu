@@ -6,7 +6,9 @@ import (
 
 	"github/hchw/kianshu/internal/flow"
 	"github/hchw/kianshu/internal/model"
+	"github/hchw/kianshu/internal/scheduler"
 
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -65,6 +67,49 @@ func UpdateDraft(db *gorm.DB, flowID uint, name, treeJSON string) (*model.FlowDr
 		return nil, err
 	}
 	return d, nil
+}
+
+// DeleteFlow hard-deletes a flow and all of its associated data: draft,
+// versions, execution logs and schedules. Registered cron jobs are cancelled
+// after the transaction commits so no orphan schedule keeps firing. sched may
+// be nil (e.g. in tests) to skip job cancellation.
+func DeleteFlow(db *gorm.DB, sched *ScheduleManager, flowID uint) error {
+	var f model.TestFlow
+	if err := db.First(&f, flowID).Error; err != nil {
+		return ErrFlowNotFound
+	}
+	// 先收集该流的调度任务，事务提交后统一取消，避免遗留仍在触发的定时任务。
+	var schedules []model.FlowSchedule
+	if err := db.Where("flow_id = ?", flowID).Find(&schedules).Error; err != nil {
+		return err
+	}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		for _, m := range []any{
+			&model.FlowDraft{},
+			&model.FlowVersion{},
+			&model.ExecutionLog{},
+			&model.FlowSchedule{},
+		} {
+			if err := tx.Where("flow_id = ?", flowID).Delete(m).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Delete(&f).Error
+	})
+	if err != nil {
+		return err
+	}
+	if sched != nil {
+		for _, s := range schedules {
+			if s.JobID == "" {
+				continue
+			}
+			if err := sched.scheduler.Remove(s.JobID); err != nil && !errors.Is(err, scheduler.ErrJobNotFound) {
+				log.Warnf("删除流 %d: 取消调度 %d 失败: %v", flowID, s.ID, err)
+			}
+		}
+	}
+	return nil
 }
 
 // SnapshotAPINodes redundantly snapshots the referenced test units into every

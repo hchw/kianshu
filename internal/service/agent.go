@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github/hchw/kianshu/internal/flow"
 	"github/hchw/kianshu/internal/model"
@@ -31,12 +32,37 @@ const (
 	ModeGenerate Mode = "generate"
 )
 
-// Event is one tool-round output pushed in real time over SSE.
+// Event kinds pushed over SSE in real time.
+const (
+	// EventKindRound announces that a new LLM round is starting.
+	EventKindRound = "round"
+	// EventKindText carries one incremental chunk of the assistant's reply.
+	EventKindText = "text"
+	// EventKindTool carries one tool invocation and its result (default kind).
+	EventKindTool = "tool"
+)
+
+// Event is one round of LLM activity pushed in real time over SSE.
 type Event struct {
+	Kind   string `json:"kind,omitempty"` // "round" | "text" | "tool"(默认)
 	Round  int    `json:"round"`
-	Tool   string `json:"tool"`
+	Tool   string `json:"tool,omitempty"`
 	Args   any    `json:"args,omitempty"`
-	Result any    `json:"result"`
+	Result any    `json:"result,omitempty"`
+	// Text is the incremental assistant content for kind=text events.
+	Text string `json:"text,omitempty"`
+}
+
+// AgentHooks carries the real-time progress callbacks of an agent run
+// (the SSE emit channel).
+type AgentHooks struct {
+	Emit func(Event)
+}
+
+func (h AgentHooks) emit(ev Event) {
+	if h.Emit != nil {
+		h.Emit(ev)
+	}
 }
 
 // AgentOptions carries the inputs of one agent submission.
@@ -46,6 +72,9 @@ type AgentOptions struct {
 	SelectedNodes []string
 	Mode          Mode
 	Emit          func(Event)
+	// StartRound, when > 0, numbers the first round of this loop from that
+	// value (used by generation so build rounds continue the analysis count).
+	StartRound int
 	// PresetMessages, when non-empty, replaces the system+history+user message
 	// construction: the caller supplies the complete message list (history
 	// only, system excluded). Used by the generation workflow to resume.
@@ -59,6 +88,24 @@ type AgentResult struct {
 	Finished     bool     `json:"finished"`
 	Message      string   `json:"message,omitempty"`
 	Events       []Event  `json:"events"`
+}
+
+// StreamingProvider is the optional streaming capability of a ChatProvider.
+// Real *openai.Client wrappers implement it; test fakes fall back to the
+// non-streaming path.
+type StreamingProvider interface {
+	ChatProvider
+	StreamChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest, onChunk openai.StreamCallback) (*openai.CompletionResponse, error)
+}
+
+// newAgentCompletionRequest builds a chat request for agent rounds with deep
+// thinking (chain-of-thought) disabled.
+func newAgentCompletionRequest(model string, messages []openai.Message) openai.CompletionRequest {
+	return openai.CompletionRequest{
+		Model:    model,
+		Messages: messages,
+		Thinking: &openai.ThinkingConfig{Type: "disabled"},
+	}
 }
 
 // systemPrompt builds the base system message for the agent loop.
@@ -173,10 +220,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 	}
 
 	// Rebuild the message list for this submission: system + prior history + user.
-	req := openai.CompletionRequest{
-		Model:    opt.Provider.GetModel(),
-		Messages: []openai.Message{{Role: "system", Content: strPtr(systemPrompt(opt.Mode))}},
-	}
+	req := newAgentCompletionRequest(opt.Provider.GetModel(), []openai.Message{{Role: "system", Content: strPtr(systemPrompt(opt.Mode))}})
 	if len(opt.PresetMessages) > 0 {
 		req.Messages = append(req.Messages, opt.PresetMessages...)
 	} else {
@@ -189,20 +233,47 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 	}
 	req.Tools = toolSchemas()
 
-	res := &AgentResult{}
+	res := &AgentResult{Events: []Event{}}
 	var lastText string
 
-	for round := 1; round <= MaxRounds; round++ {
+	startRound := opt.StartRound
+	if startRound < 1 {
+		startRound = 1
+	}
+	for round := startRound; round < startRound+MaxRounds; round++ {
 		res.Rounds = round
 		if ctx.Err() != nil {
 			break
 		}
 		log.Infof("agent: flow=%d round=%d 调用 LLM (model=%s, 消息数=%d)", flowID, round, opt.Provider.GetModel(), len(req.Messages))
-		resp, err := opt.Provider.ChatCompletion(ctx, opt.Provider, req)
-		if err != nil {
-			log.Errorf("agent: flow=%d round=%d LLM 调用失败: %v", flowID, round, err)
+		if opt.Emit != nil {
+			opt.Emit(Event{Kind: EventKindRound, Round: round})
+		}
+
+		// 3 次重试应对瞬态失败(网络抖动/限流)
+		var resp *openai.CompletionResponse
+		var lastErr error
+		for retry := 0; retry < 3; retry++ {
+			resp, lastErr = opt.complete(ctx, opt.Provider, req, func(text string) {
+				if opt.Emit != nil {
+					opt.Emit(Event{Kind: EventKindText, Round: round, Text: text})
+				}
+			})
+			if lastErr == nil {
+				break
+			}
+			if ctx.Err() != nil {
+				break
+			}
+			if retry < 2 {
+				log.Warnf("agent: flow=%d round=%d LLM 调用失败(第%d次重试): %v", flowID, round, retry+1, lastErr)
+				time.Sleep(time.Duration(retry+1) * 2 * time.Second)
+			}
+		}
+		if lastErr != nil {
+			log.Errorf("agent: flow=%d round=%d LLM 调用失败(已重试3次): %v", flowID, round, lastErr)
 			req.Messages = append(req.Messages, openai.Message{
-				Role: "system", Content: strPtr("上次调用出错:" + err.Error() + ",请按标准工具格式重试"),
+				Role: "system", Content: strPtr("上次调用出错:" + lastErr.Error() + ",请按标准工具格式重试"),
 			})
 			continue
 		}
@@ -220,7 +291,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 			log.Infof("agent: flow=%d round=%d tool=%s args=%s", flowID, round, tc.Function.Name, tc.Function.Arguments)
 			result := ExecTool(toolCtx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 			log.Infof("agent: flow=%d round=%d tool=%s 结果 ok=%v err=%s", flowID, round, tc.Function.Name, result.OK, result.Error)
-			ev := Event{Round: round, Tool: tc.Function.Name, Args: tc.Function.Arguments, Result: result}
+			ev := Event{Kind: EventKindTool, Round: round, Tool: tc.Function.Name, Args: tc.Function.Arguments, Result: result}
 			res.Events = append(res.Events, ev)
 			if opt.Emit != nil {
 				opt.Emit(ev)
@@ -262,6 +333,15 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 		return nil, err
 	}
 	return res, nil
+}
+
+// complete calls the provider, preferring streaming when available so the
+// assistant's reply reaches the client token by token via onText.
+func (opt AgentOptions) complete(ctx context.Context, p ChatProvider, req openai.CompletionRequest, onText func(string)) (*openai.CompletionResponse, error) {
+	if sp, ok := p.(StreamingProvider); ok {
+		return sp.StreamChatCompletion(ctx, p, req, onText)
+	}
+	return p.ChatCompletion(ctx, p, req)
 }
 
 func strPtr(s string) *string { return &s }

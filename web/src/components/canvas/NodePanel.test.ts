@@ -66,3 +66,4 @@ describe('NodePanel IO preservation', () => {
     expect(next.nodes.n1.outputs!.new_output.desc).toBe('new')
   })
 })
+

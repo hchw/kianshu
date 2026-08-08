@@ -1,6 +1,8 @@
 package flow
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 )
 
@@ -408,4 +410,31 @@ func hasCode(res Result, code string) bool {
 		}
 	}
 	return false
+}
+
+// TestResultEmptyArrays guards against nil slices leaking as JSON null: a
+// clean tree must serialize errors/warnings as [] rather than null so the
+// frontend never hits a null .length access.
+func TestResultEmptyArrays(t *testing.T) {
+	tree := helperTree(t, func(tree *Tree) {
+		tree.Start = "s"
+		add(tree, "s", NodeStart)
+		a := add(tree, "a", NodeAPI)
+		_ = a
+		link(tree, "s", "a")
+	})
+	res := Validate(tree, ValidatorOptions{})
+	if res.Errors == nil {
+		t.Fatal("expected non-nil Errors slice, got nil")
+	}
+	if res.Warnings == nil {
+		t.Fatal("expected non-nil Warnings slice, got nil")
+	}
+	b, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	if !bytes.Contains(b, []byte(`"errors":[]`)) {
+		t.Fatalf("expected \"errors\":[] in JSON, got %s", b)
+	}
 }

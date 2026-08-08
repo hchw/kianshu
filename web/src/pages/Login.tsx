@@ -3,9 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { login } from '../api/auth'
 import { apiError } from '../api/client'
 import { setSession } from '../store/session'
+import { BusyButton } from '../components/feedback/BusyButton'
+import { ErrorNote } from '../components/feedback/ErrorNote'
+import { useToast } from '../components/feedback/Toast'
 
 export default function Login() {
   const nav = useNavigate()
+  const toast = useToast()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
@@ -18,9 +22,12 @@ export default function Login() {
     try {
       const res = await login(username, password)
       setSession(res.token, { id: res.id, username: res.username })
+      toast.success('登录成功')
       nav('/test-sets')
     } catch (e) {
-      setErr(apiError(e))
+      const msg = apiError(e)
+      setErr(msg)
+      toast.error(msg)
     } finally {
       setBusy(false)
     }
@@ -44,10 +51,10 @@ export default function Login() {
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
         />
-        {err && <p className="err">{err}</p>}
-        <button disabled={busy} type="submit">
+        {err && <ErrorNote>{err}</ErrorNote>}
+        <BusyButton type="submit" className="primary" busy={busy}>
           {busy ? '登录中…' : '登录'}
-        </button>
+        </BusyButton>
         <button type="button" className="link" onClick={() => nav('/register')}>
           没有账号?去注册
         </button>

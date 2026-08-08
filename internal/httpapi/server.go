@@ -99,6 +99,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/test-sets/:id/flows", s.handleListFlows)
 		auth.POST("/test-sets/:id/flows", s.handleCreateFlow)
 		auth.GET("/flow/flows/:flowID/draft", s.handleGetDraft)
+		auth.DELETE("/flow/flows/:flowID", s.handleDeleteFlow)
 		auth.PUT("/flow/flows/:flowID/draft", s.handleUpdateDraft)
 		auth.POST("/flow/flows/:flowID/draft/validate", s.handleValidateDraft)
 		auth.POST("/flow/flows/:flowID/draft/trial-run", s.handleTrialRun)

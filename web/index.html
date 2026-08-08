@@ -5,6 +5,19 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>web</title>
+    <script>
+      // 在 React 挂载前确定主题，消除 FOUC；无偏好默认深色
+      ;(function () {
+        var theme = 'dark'
+        try {
+          var saved = localStorage.getItem('kianshu_theme')
+          if (saved === 'light') theme = 'light'
+        } catch (e) {
+          /* localStorage 不可用时回退默认深色 */
+        }
+        document.documentElement.setAttribute('data-theme', theme)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

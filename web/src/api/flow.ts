@@ -15,6 +15,9 @@ export interface FlowNode {
   inputs?: Record<string, IOKey>
   outputs?: Record<string, IOKey>
   config?: unknown
+  /** Optional canvas coordinates; absent = auto-layout (pure presentation). */
+  x?: number
+  y?: number
 }
 
 export interface FlowTree {
@@ -49,8 +52,9 @@ export interface ValidationErrorItem {
 }
 
 export interface ValidationResult {
-  errors: ValidationErrorItem[]
-  warnings: ValidationErrorItem[]
+  /** 后端可能返回 null（Go nil slice 序列化），消费端必须防御。 */
+  errors: ValidationErrorItem[] | null
+  warnings: ValidationErrorItem[] | null
 }
 
 export async function getDraft(flowID: number) {
@@ -68,6 +72,11 @@ export async function updateDraft(flowID: number, name: string, tree: FlowTree) 
 
 export async function validateDraft(flowID: number) {
   const { data } = await api.post<ValidationResult>(`/flow/flows/${flowID}/draft/validate`)
+  return data
+}
+
+export async function deleteFlow(flowID: number) {
+  const { data } = await api.delete(`/flow/flows/${flowID}`)
   return data
 }
 
