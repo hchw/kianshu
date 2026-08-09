@@ -176,13 +176,26 @@ func runAndLog(db *gorm.DB, flowID, versionID uint, versionNo int, tree *flow.Tr
 	return log, nil
 }
 
-// ListRuns returns the execution logs of a flow, newest first.
-func ListRuns(db *gorm.DB, flowID uint) ([]model.ExecutionLog, error) {
-	var logs []model.ExecutionLog
-	if err := db.Where("flow_id = ?", flowID).Order("id desc").Find(&logs).Error; err != nil {
-		return nil, err
+// ListRuns returns the execution logs of a flow, newest first, with
+// optional pagination. page is 1-indexed; pageSize defaults to 20, max 100.
+// total is the total count of matching records.
+func ListRuns(db *gorm.DB, flowID uint, page, pageSize int) ([]model.ExecutionLog, int64, error) {
+	if page < 1 {
+		page = 1
 	}
-	return logs, nil
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	var total int64
+	if err := db.Model(&model.ExecutionLog{}).Where("flow_id = ?", flowID).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var logs []model.ExecutionLog
+	offset := (page - 1) * pageSize
+	if err := db.Where("flow_id = ?", flowID).Order("id desc").Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
+		return nil, 0, err
+	}
+	return logs, total, nil
 }
 
 // GetRun returns one execution log by id.

@@ -125,11 +125,11 @@ func TestFlowLifecycle(t *testing.T) {
 		t.Fatalf("initial draft should contain a start node, got %v", draft["tree"])
 	}
 
-	// Build a valid tree: start -> api(auth from cache-set).
+	// Build a valid tree: start -> cache-set(writes authorization) -> api(reader).
 	tree := `{"start":"n1","nodes":{
 	  "n1":{"id":"n1","type":"start","outputs":{"token":{"type":"primitive"}},"config":{"params":{"account":"a","password":"p"}}},
-	  "n2":{"id":"n2","type":"api","parent":"n1","inputs":{"authorization":{"type":"primitive"}},"outputs":{"data":{"type":"object"}},"config":{"unit_id":0}},
-	  "cs1":{"id":"cs1","type":"cache-set","parent":"n2","inputs":{},"outputs":{},"config":{"writes":{"authorization":"$.token"}}}
+	  "cs1":{"id":"cs1","type":"cache-set","parent":"n1","inputs":{},"outputs":{},"config":{"writes":{"authorization":"$.token"}}},
+	  "n2":{"id":"n2","type":"api","parent":"cs1","inputs":{"authorization":{"type":"primitive","source":"$cache.authorization"}},"outputs":{"data":{"type":"object"}},"config":{"unit_id":0}}
 	}}`
 	_, updated := c.do("PUT", fmt.Sprintf("/api/flow/flows/%d/draft", flowID),
 		fmt.Sprintf(`{"name":"my flow","tree":%s}`, mustJSON(t, tree)), http.StatusOK)

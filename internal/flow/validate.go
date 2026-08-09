@@ -66,21 +66,6 @@ func Validate(t *Tree, opts ValidatorOptions) Result {
 // cacheWrites maps a cache key to the set of cache-set node IDs that write it.
 type cacheWrites map[string][]string
 
-// collectCacheWrites statically gathers every cache key written by any
-// cache-set node in the tree by scanning all nodes for NodeCacheSet type.
-func (t *Tree) collectCacheWrites() cacheWrites {
-	writes := cacheWrites{}
-	for id, n := range t.Nodes {
-		if n == nil || n.Type != NodeCacheSet {
-			continue
-		}
-		for _, k := range cacheSetWrites(n) {
-			writes[k] = append(writes[k], id)
-		}
-	}
-	return writes
-}
-
 // cacheSetWrites returns the keys a cache-set node writes.
 func cacheSetWrites(n *Node) []string {
 	var cfg struct {
@@ -96,15 +81,18 @@ func cacheSetWrites(n *Node) []string {
 
 // validateIOContracts checks that every mandatory input key of every node is
 // satisfied by an ancestor's output or by a shared-cache key written by a
-// cache-set reachable earlier in the tree (static DFS visibility).
+// cache-set that is an ancestor of the reading node. 设计约束:cache-set 必须
+// 作为 reader 的祖先节点(reader 挂在 cache-set 之下),执行顺序由"父先于子"
+// 天然保证——不依赖同级排序。旁支或后置的 cache-set 对 reader 不可见。
 func (t *Tree) validateIOContracts() []ValidationError {
 	var errs []ValidationError
 	for id, n := range t.Nodes {
 		if n == nil {
 			continue
 		}
-		// Outputs available from ancestors (excluding the node itself).
+		// Outputs and cache writes available from ancestors (excluding the node itself).
 		provided := map[string]IOKey{}
+		ancestorCache := cacheWrites{}
 		for _, a := range t.Ancestors(id) {
 			an, ok := t.Nodes[a]
 			if !ok || an == nil {
@@ -113,16 +101,20 @@ func (t *Tree) validateIOContracts() []ValidationError {
 			for k, v := range an.Outputs {
 				provided[k] = v
 			}
+			if an.Type == NodeCacheSet {
+				for _, k := range cacheSetWrites(an) {
+					ancestorCache[k] = append(ancestorCache[k], a)
+				}
+			}
 		}
-		allCache := t.collectCacheWrites()
 		for key, io := range n.Inputs {
 			if io.Source != "" {
 				if ck, ok := CacheKey(io.Source); ok {
-					if _, exists := allCache[ck]; !exists {
+					if _, exists := ancestorCache[ck]; !exists {
 						errs = append(errs, ValidationError{
 							NodeID: id, Code: "contract.cache_source_missing",
-							Level: LevelError, Message: fmt.Sprintf("输入 %s 引用的缓存 key %s 无 cache-set 写入者", key, ck),
-							ExpectedFormat: "$cache.<key> 需存在写入该 key 的 cache-set 节点",
+							Level: LevelError, Message: fmt.Sprintf("输入 %s 引用的缓存 key %s 无祖先 cache-set 写入者", key, ck),
+							ExpectedFormat: `需存在写入该 key 且位于本节点祖先位置的 cache-set 节点,配置形如 {"writes":{"<key>":"<jsonata,对父节点输出求值>"}}`,
 						})
 					}
 					continue
@@ -139,7 +131,7 @@ func (t *Tree) validateIOContracts() []ValidationError {
 			if _, exists := provided[key]; exists {
 				continue
 			}
-			if _, exists := allCache[key]; exists {
+			if _, exists := ancestorCache[key]; exists {
 				continue
 			}
 			if isAuthKey(key) {
@@ -163,7 +155,7 @@ func (t *Tree) validateIOContracts() []ValidationError {
 // isAuthKey recognizes header authentication keys such as authorization or token.
 func isAuthKey(key string) bool {
 	lk := strings.ToLower(key)
-	for _, token := range []string{"authorization", "token", "api-key", "apikey", "cookie", "auth"} {
+	for _, token := range []string{"authorization", "token", "api-key", "apikey", "api_key", "cookie", "auth"} {
 		if strings.Contains(lk, token) {
 			return true
 		}

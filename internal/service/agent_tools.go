@@ -33,6 +33,7 @@ type UnitBrief struct {
 	Tag      string `json:"tag"`
 	Name     string `json:"name"`
 	Security string `json:"security,omitempty"`
+	Auth     string `json:"auth,omitempty"`
 }
 
 // ToolContext carries the state tools mutate: the in-memory working tree, the
@@ -105,7 +106,7 @@ func toBriefs(units []model.TestUnit) []UnitBrief {
 	for _, u := range units {
 		out = append(out, UnitBrief{
 			ID: u.ID, Method: u.Method, Path: u.Path, Slug: u.Slug,
-			Tag: u.Tag, Name: u.Name, Security: u.Security,
+			Tag: u.Tag, Name: u.Name, Security: u.Security, Auth: securityScheme(u.Security),
 		})
 	}
 	return out

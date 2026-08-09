@@ -114,7 +114,9 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
         await refreshSession()
         onChangedRef.current()
       },
-      onError: (msg) => {
+      onError: (msg, status) => {
+        // 404 表示后端没有正在运行的 Agent 任务（断线重连时属正常情况），不在页面上报错
+        if (status === 404) return
         setErr(msg)
         onTreePreviewRef.current(snapshot)
       },

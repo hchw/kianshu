@@ -3,6 +3,7 @@ package flow
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -164,16 +165,16 @@ func TestAuthHeader(t *testing.T) {
 		}
 	})
 
-	t.Run("auth key satisfied via cache-set, reader not under it", func(t *testing.T) {
+	t.Run("auth key satisfied via ancestor cache-set", func(t *testing.T) {
 		tree := helperTree(t, func(tree *Tree) {
 			tree.Start = "s"
 			add(tree, "s", NodeStart)
-			a := add(tree, "a", NodeAPI)
-			a.Inputs["authorization"] = IOKey{Type: IOTypePrimitive, Source: "$cache.authorization"}
 			cs := add(tree, "cs", NodeCacheSet)
 			cs.Config = mustConfig(map[string]any{"writes": map[string]string{"authorization": "$.token"}})
+			a := add(tree, "a", NodeAPI)
+			a.Inputs["authorization"] = IOKey{Type: IOTypePrimitive, Source: "$cache.authorization"}
 			link(tree, "s", "cs")
-			link(tree, "s", "a") // reader 不在 cache-set 下方，并列即可
+			link(tree, "cs", "a") // reader 必须挂在 cache-set 之下(祖先结构)
 		})
 		res := Validate(tree, ValidatorOptions{})
 		if res.HasErrors() {
@@ -343,6 +344,12 @@ func TestCacheStaticVisibility(t *testing.T) {
 		if !hasCode(res, "contract.cache_source_missing") {
 			t.Fatalf("expected cache_source_missing, got %v", res.Errors)
 		}
+		// expected_format 必须携带正确的 cache-set 配置形状示例(修复信息闭环)
+		for _, e := range res.Errors {
+			if e.Code == "contract.cache_source_missing" && !strings.Contains(e.ExpectedFormat, `"writes"`) {
+				t.Fatalf("cache_source_missing expected_format should carry writes shape, got %q", e.ExpectedFormat)
+			}
+		}
 	})
 
 	t.Run("cache key with writer valid", func(t *testing.T) {
@@ -354,7 +361,7 @@ func TestCacheStaticVisibility(t *testing.T) {
 			api := add(tree, "api", NodeAPI)
 			api.Inputs["authorization"] = IOKey{Type: IOTypePrimitive, Source: "$cache.token"}
 			link(tree, "s", "cs")
-			link(tree, "s", "api") // reader 不必在 cache-set 下方
+			link(tree, "cs", "api") // reader 必须挂在 cache-set 之下(祖先结构)
 		})
 		res := Validate(tree, ValidatorOptions{})
 		if res.HasErrors() {
@@ -371,11 +378,27 @@ func TestCacheStaticVisibility(t *testing.T) {
 			api := add(tree, "api", NodeAPI)
 			api.Inputs["token"] = IOKey{Type: IOTypePrimitive}
 			link(tree, "s", "cs")
-			link(tree, "s", "api") // bare-key reader 也不必在 cache-set 下方
+			link(tree, "cs", "api") // bare-key reader 挂 cache-set 之下
 		})
 		res := Validate(tree, ValidatorOptions{})
 		if res.HasErrors() {
 			t.Fatalf("bare-key cache reference should validate, got %v", res.Errors)
+		}
+	})
+	t.Run("sibling cache-set is not a writer (no sibling ordering)", func(t *testing.T) {
+		tree := helperTree(t, func(tree *Tree) {
+			tree.Start = "s"
+			add(tree, "s", NodeStart)
+			cs := add(tree, "cs", NodeCacheSet)
+			cs.Config = mustConfig(map[string]any{"writes": map[string]string{"token": "$.token"}})
+			api := add(tree, "api", NodeAPI)
+			api.Inputs["authorization"] = IOKey{Type: IOTypePrimitive, Source: "$cache.token"}
+			link(tree, "s", "cs")
+			link(tree, "s", "api") // cache-set 是 api 的前置兄弟,不是祖先
+		})
+		res := Validate(tree, ValidatorOptions{})
+		if !hasCode(res, "contract.cache_source_missing") {
+			t.Fatalf("sibling cache-set must not satisfy the reader, got %v", res.Errors)
 		}
 	})
 }

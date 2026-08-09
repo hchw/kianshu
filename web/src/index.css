@@ -410,7 +410,7 @@ h3 {
     border-color var(--t-normal);
 }
 
-.card:not(.sub):hover {
+.card:not(.sub):not(.side-card):hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
 }
@@ -1207,4 +1207,104 @@ h3 {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ============================================================
+   Cron 输入组件
+   ============================================================ */
+
+.cron-input {
+  display: flex;
+  flex-direction: column;
+}
+
+.cron-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.cron-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.cron-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.cron-fields select {
+  min-width: 72px;
+}
+
+.cron-current {
+  word-break: break-all;
+}
+
+.cron-desc {
+  font-weight: 500;
+}
+
+.cron-next {
+  padding: 6px 8px;
+  border-radius: var(--radius-6);
+  background: var(--hover);
+}
+
+.cron-input input.err {
+  border-color: var(--danger);
+}
+
+/* ============================================================
+   执行日志弹窗与分页
+   ============================================================ */
+
+.run-popover {
+  position: fixed;
+  z-index: 50;
+  width: 360px;
+  max-height: 440px;
+  overflow-y: auto;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-lg);
+}
+
+.run-popover-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.run-row-marker {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.pagination button {
+  padding: 4px 12px;
+  font-size: var(--fs-12);
 }

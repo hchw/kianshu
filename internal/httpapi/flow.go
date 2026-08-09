@@ -3,7 +3,9 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github/hchw/kianshu/internal/flow"
@@ -422,6 +424,7 @@ func (s *Server) handleTrialRun(c *gin.Context) {
 		writeErr(c, http.StatusInternalServerError, "试运行失败")
 		return
 	}
+	s.RunBus.Publish(log)
 	writeJSON(c, http.StatusCreated, log)
 }
 
@@ -459,17 +462,20 @@ func (s *Server) handleRunVersion(c *gin.Context) {
 		writeErr(c, http.StatusInternalServerError, "执行版本失败")
 		return
 	}
+	s.RunBus.Publish(log)
 	writeJSON(c, http.StatusCreated, log)
 }
 
 // handleListRuns returns the execution logs of a flow.
 //
 //	@Summary	列出执行日志
-//	@Description	返回流的全部执行日志记录。需要读权限。
+//	@Description	返回流的执行日志记录,支持分页。需要读权限。
 //	@Tags		测试流
 //	@Produce	json
 //	@Security	BearerAuth
-//	@Param		flowID	path	uint	true	"流 ID"
+//	@Param		flowID		path	uint	true	"流 ID"
+//	@Param		page		query	int	false	"页码(1开始,默认1)"
+//	@Param		page_size	query	int	false	"每页条数(默认20,最大100)"
 //	@Success	200	{object}	runListResp	"执行日志列表"
 //	@Failure	400	{object}	errorResp	"无效的流 ID"
 //	@Failure	403	{object}	errorResp	"无权访问该流"
@@ -480,12 +486,14 @@ func (s *Server) handleListRuns(c *gin.Context) {
 	if !ok {
 		return
 	}
-	logs, err := service.ListRuns(s.DB, flowID)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	logs, total, err := service.ListRuns(s.DB, flowID, page, pageSize)
 	if err != nil {
 		writeErr(c, http.StatusInternalServerError, "查询执行日志失败")
 		return
 	}
-	writeJSON(c, http.StatusOK, gin.H{"runs": logs})
+	writeJSON(c, http.StatusOK, gin.H{"runs": logs, "total": total, "page": page, "page_size": pageSize})
 }
 
 // handleGetRun returns one execution log of a flow.
@@ -527,4 +535,43 @@ func (s *Server) handleGetRun(c *gin.Context) {
 		return
 	}
 	writeJSON(c, http.StatusOK, log)
+}
+
+// handleSubscribeRuns streams newly created execution logs as SSE so the
+// frontend can update the run list in real time without polling.
+//
+//	@Summary	订阅执行日志（实时推送）
+//	@Description	以 SSE 实时推送流的执行日志。新日志产生时立即推送到客户端。需要读权限。
+//	@Tags		测试流
+//	@Produce	text/event-stream
+//	@Security	BearerAuth
+//	@Param		flowID	path	uint	true	"流 ID"
+//	@Success	200	{string}	string	"SSE 事件流"
+//	@Failure	400	{object}	errorResp	"无效的流 ID"
+//	@Failure	403	{object}	errorResp	"无权访问该流"
+//	@Router		/flow/flows/{flowID}/runs/subscribe [get]
+func (s *Server) handleSubscribeRuns(c *gin.Context) {
+	flowID, _, ok := s.flowReadable(c)
+	if !ok {
+		return
+	}
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Flush()
+
+	ctx := c.Request.Context()
+	ch := s.RunBus.Subscribe(flowID)
+	defer s.RunBus.Unsubscribe(flowID, ch)
+
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case logEntry := <-ch:
+			data, _ := json.Marshal(logEntry)
+			io.WriteString(w, "data: "+string(data)+"\n\n")
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	})
 }

@@ -159,17 +159,33 @@ func systemPrompt(mode Mode) string {
 
 节点类型:start、api(引用测试单元,unit_id 来自 list_units)、
 assert、loop、try、catch、cache-set、adapter(JSONata 转换)。
-cache-set 写入共享缓存:连到要提取数据的上游节点下即可。
-读 $cache.xxx 的节点不要求父子关系——只要执行顺序上
-cache-set 先于 reader(同级兄弟靠左先执行、祖先先于后代)，
-reader 就能读到缓存值。同级兄弟中 cache-set 必须排在 reader 前面。
+cache-set 写入共享缓存:必须作为 $cache.xxx reader 的祖先节点——
+把 reader 挂在 cache-set 之下(结构:login → cache-set → reader)。
+执行顺序由"父先于子"天然保证,cache-set 先写、reader 后读,
+不要依赖同级兄弟排序(同级排序不可靠)。
+其 config 必须(MUST)为 {"writes": {"<缓存key>": "<jsonata>"}},
+如 {"writes": {"token": "token"}}——writes 的键是要写入的缓存 key,
+值是对该 cache-set 父节点输出求值的 JSONata 表达式
+(父节点输出含 token 字段则写 "token")。
 每次修改后调用 validate_flow 校验；校验失败时根据返回的
 expected_format 修正(可插 adapter 转换参数、加 cache-set 存 token)。`
 	if mode == ModeGenerate {
-		p += ` 按固定模板顺序生成:启动 → 认证取 token/写缓存 →
+		p += ` 分析阶段仅调用只读工具(list_units/filter_units/get_flow)
+做需求分析与冲突排查,确认无冲突后再开始创建节点——
+不要提前建树。确认后按固定模板顺序生成:启动 → 认证取 token/写缓存 →
 业务序列 → 断言 → 收尾。若分析发现认证冲突、参数缺失、
 业务顺序不定或 swagger 语义不清,调用 validate_flow 前
-先说明待确认问题。`
+先说明待确认问题。
+
+需要认证(security 非空)的单元必须建立认证链,标准模板如下
+(仅需按 list_units 实际结果替换 unit_id 与节点 id;parent 填
+get_flow 中 start 节点的实际 id):
+登录节点(公开单元,如 POST /auth/login):
+{"id":"n_login","type":"api","parent":"<start-id>","inputs":{"username":{"type":"string","source":"username"},"password":{"type":"string","source":"password"}},"config":{"unit_id":<登录unit_id>}}
+缓存节点(挂在登录节点下,把 token 写入共享缓存):
+{"id":"n_cache_token","type":"cache-set","parent":"n_login","config":{"writes":{"token":"token"}}}
+受保护节点(auth 输入引用缓存,必须挂在 cache-set 之下作为其子节点):
+{"id":"n_list","type":"api","parent":"n_cache_token","inputs":{"auth":{"type":"string","source":"$cache.token"}},"config":{"unit_id":<受保护unit_id>}}`
 	}
 	return p
 }
@@ -205,7 +221,7 @@ func toolSchemas() []openai.Tool {
 			Type: "function",
 			Function: openai.ToolFunction{
 				Name:        toolCreateNode,
-				Description: "创建节点。type: start|api|assert|loop|try|catch|cache-set|adapter。api 需带 unit_id,建议同时声明 inputs(参数键与类型)和 config.params(执行参数值键值对)。cache-set 需连到数据来源的上游节点。",
+				Description: "创建节点。type: start|api|assert|loop|try|catch|cache-set|adapter。api 需带 unit_id,建议同时声明 inputs(参数键与类型)和 config.params(执行参数值键值对)。cache-set 需连到数据来源的上游节点,其 config 形状为 {\"writes\": {\"<缓存key>\": \"<jsonata,对父节点输出求值>\"}},如 {\"writes\": {\"token\": \"token\"}}。",
 				Parameters: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"type":{"type":"string"},"parent":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id","type"],"additionalProperties":false}`),
 			},
 		},
@@ -213,7 +229,7 @@ func toolSchemas() []openai.Tool {
 			Type: "function",
 			Function: openai.ToolFunction{
 				Name:        toolUpdateNode,
-				Description: "更新节点的 inputs/outputs 或 config",
+				Description: "更新节点的 inputs/outputs 或 config。cache-set 的 config 形状为 {\"writes\": {\"<缓存key>\": \"<jsonata,对父节点输出求值>\"}},如 {\"writes\": {\"token\": \"token\"}}。",
 				Parameters: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id"],"additionalProperties":false}`),
 			},
 		},

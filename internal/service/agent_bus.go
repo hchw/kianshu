@@ -52,6 +52,21 @@ func (b *AgentEventBus) MarkDone(flowID uint) {
 	fr.mu.Unlock()
 }
 
+// Active reports whether a run for the flow is currently in progress (has
+// pushed events but not yet finished). A flow with no run, or a run that has
+// already completed (MarkDone), reports false.
+func (b *AgentEventBus) Active(flowID uint) bool {
+	b.mu.Lock()
+	fr, ok := b.flows[flowID]
+	b.mu.Unlock()
+	if !ok {
+		return false
+	}
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+	return !fr.done
+}
+
 // Remove cleans up the flow's event buffer.
 func (b *AgentEventBus) Remove(flowID uint) {
 	b.mu.Lock()

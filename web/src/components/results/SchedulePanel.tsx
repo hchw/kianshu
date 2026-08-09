@@ -8,6 +8,7 @@ import {
   type FlowSchedule,
 } from '../../api/schedule'
 import { BusyButton } from '../feedback/BusyButton'
+import CronInput from '../feedback/CronInput'
 import { EmptyState } from '../feedback/EmptyState'
 import { ErrorNote } from '../feedback/ErrorNote'
 import { Clock } from 'lucide-react'
@@ -73,9 +74,11 @@ export default function SchedulePanel({ flowID }: Props) {
   return (
     <div className="card side-card">
       <h3>定时调度</h3>
+      <div style={{ marginBottom: 8 }}>
+        <CronInput value={cron} onChange={setCron} error={err && err.includes('cron') ? err : ''} />
+      </div>
       <form className="row tight" onSubmit={add}>
-        <input placeholder="cron 表达式" value={cron} onChange={(e) => setCron(e.target.value)} />
-        <BusyButton type="submit" className="primary" busy={busy}>
+        <BusyButton type="submit" className="primary" busy={busy} disabled={!cron.trim()}>
           添加
         </BusyButton>
       </form>

@@ -158,6 +158,15 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 	if err := SaveFlowSession(db, session); err != nil {
 		return nil, err
 	}
+	// Analysis 阶段(工具调用感知循环)可能已通过 create_node/update_node 修改了树
+	// (LLM 可能提前建树)。若不落盘,RunAgent 会从 DB 重建空树,导致生成结果丢失——
+	// 空树 validate 仍能通过(valid=true),因此必须在此持久化,保证编辑循环从完整树继续。
+	if err := SnapshotAPINodes(db, tree); err != nil {
+		return nil, err
+	}
+	if _, err := UpdateDraft(db, flowID, d.Name, tree.String()); err != nil {
+		return nil, err
+	}
 	return RunAgent(ctx, db, flowID, userID, AgentOptions{
 		Provider:       provider,
 		Instruction:    instruction,
@@ -422,7 +431,7 @@ func securityScheme(securityJSON string) string {
 // token (mirrors the validator's and executor's rule).
 func isAuthKey(key string) bool {
 	lk := strings.ToLower(key)
-	for _, token := range []string{"authorization", "token", "api-key", "apikey", "cookie", "auth"} {
+	for _, token := range []string{"authorization", "token", "api-key", "apikey", "api_key", "cookie", "auth"} {
 		if strings.Contains(lk, token) {
 			return true
 		}

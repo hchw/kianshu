@@ -624,6 +624,27 @@ func TestSystemPromptContainsRoleAndPrinciples(t *testing.T) {
 	}
 }
 
+func TestSystemPromptCacheSetShape(t *testing.T) {
+	p := systemPrompt(ModeEdit)
+	// cache-set 的正确配置形状必须在提示中显式呈现(writes 键值映射)
+	if !strings.Contains(p, `"writes"`) {
+		t.Fatalf("system prompt should teach cache-set config.writes shape")
+	}
+	if !strings.Contains(p, `{"writes": {"token": "token"}}`) {
+		t.Fatalf("system prompt should include concrete writes example")
+	}
+}
+
+func TestSystemPromptAuthChainTemplate(t *testing.T) {
+	p := systemPrompt(ModeGenerate)
+	// 认证链模板:登录节点 + 缓存节点(writes 形状) + 受保护节点($cache.token)
+	for _, frag := range []string{"认证链", `"type":"cache-set"`, `"writes":{"token":"token"}`, `"$cache.token"`, `"parent":"n_cache_token"`} {
+		if !strings.Contains(p, frag) {
+			t.Fatalf("generate prompt should contain auth-chain template fragment %q", frag)
+		}
+	}
+}
+
 func TestSystemPromptGenerateMode(t *testing.T) {
 	p := systemPrompt(ModeGenerate)
 	if !strings.Contains(p, "启动 → 认证") {
@@ -647,5 +668,93 @@ func TestToolCreateNodeDescription(t *testing.T) {
 	}
 	if !strings.Contains(desc, "config.params") {
 		t.Fatalf("create_node description should mention config.params: %q", desc)
+	}
+	// cache-set 配置形状说明(cache-source-missing 修复的信息闭环)
+	if !strings.Contains(desc, `"writes"`) {
+		t.Fatalf("create_node description should teach cache-set writes shape: %q", desc)
+	}
+}
+
+func TestToolUpdateNodeDescriptionMentionsCacheShape(t *testing.T) {
+	schemas := toolSchemas()
+	var desc string
+	for _, ts := range schemas {
+		if ts.Function.Name == toolUpdateNode {
+			desc = ts.Function.Description
+		}
+	}
+	if desc == "" {
+		t.Fatal("update_node tool not found")
+	}
+	if !strings.Contains(desc, `"writes"`) {
+		t.Fatalf("update_node description should teach cache-set writes shape: %q", desc)
+	}
+}
+
+func TestUnitBriefAuthLabel(t *testing.T) {
+	units := []model.TestUnit{
+		{ID: 1, Method: "GET", Path: "/protected", Slug: "get-protected", Tag: "biz", Name: "受保护接口", Security: `[{"BearerAuth":[]}]`},
+		{ID: 2, Method: "POST", Path: "/login", Slug: "post-login", Tag: "auth", Name: "登录", Security: "null"},
+	}
+	briefs := toBriefs(units)
+	if briefs[0].Auth != "token" {
+		t.Fatalf("protected unit brief should carry auth=token, got %q", briefs[0].Auth)
+	}
+	if briefs[1].Auth != "" {
+		t.Fatalf("public unit brief should not carry auth label, got %q", briefs[1].Auth)
+	}
+	// JSON 序列化时 auth 键仅出现在受保护单元(auth,omitempty)
+	out, err := json.Marshal(briefs)
+	if err != nil {
+		t.Fatalf("marshal briefs: %v", err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("unmarshal briefs: %v", err)
+	}
+	if _, has := decoded[0]["auth"]; !has {
+		t.Fatalf("brief JSON should contain auth key for protected unit: %s", out)
+	}
+	if _, has := decoded[1]["auth"]; has {
+		t.Fatalf("brief JSON should omit auth key for public unit: %s", out)
+	}
+}
+
+// TestGenerateAnalysisTreePersists 回归:C1 修复——analysis 阶段(工具调用感知循环)
+// LLM 提前建树时,树必须落盘,RunAgent 才能从完整树继续,而非 DB 里的空树。
+// 修复前:树 A 的 create_node 修改丢失,落盘只剩 start(空树 validate 仍 valid=true)。
+func TestGenerateAnalysisTreePersists(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+
+	createArgs := `{"id":"n2","type":"api","parent":"n1","config":{"unit_id":1}}`
+	prov := &fakeProvider{
+		model: "fake",
+		script: []scriptedRound{
+			// analysis round 1:LLM 直接建树(C3 引导失效的场景)
+			{content: strPtrS("分析中"), toolCalls: []openai.ToolCall{tc(toolCreateNode, createArgs)}},
+			// analysis round 2:无工具调用,分析结束
+			{content: strPtrS("分析完成,无冲突")},
+			// RunAgent round 3:无工具调用,完成
+			{content: strPtrS("完成")},
+		},
+	}
+	res, err := GenerateFlow(context.Background(), gdb, flowID, 1, "测试", prov)
+	if err != nil {
+		t.Fatalf("GenerateFlow: %v", err)
+	}
+	if !res.Finished {
+		t.Fatalf("expected finished, got %+v", res)
+	}
+	d, err := GetDraft(gdb, flowID)
+	if err != nil {
+		t.Fatalf("get draft: %v", err)
+	}
+	tree, err := flow.ParseTree(d.Tree)
+	if err != nil {
+		t.Fatalf("parse draft: %v", err)
+	}
+	if _, ok := tree.Nodes["n2"]; !ok {
+		t.Fatalf("analysis-phase node lost after generate: %s", d.Tree)
 	}
 }

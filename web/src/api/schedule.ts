@@ -35,3 +35,14 @@ export async function deleteSchedule(flowID: number, scheduleID: number) {
   const { data } = await api.delete(`/flow/flows/${flowID}/schedules/${scheduleID}`)
   return data
 }
+
+export interface CronDescribe {
+  valid: boolean
+  description: string
+  next_runs: string[]
+}
+
+export async function describeCron(cron: string): Promise<CronDescribe> {
+  const { data } = await api.post<CronDescribe>('/utils/cron/describe', { cron })
+  return data
+}

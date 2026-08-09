@@ -72,7 +72,7 @@ func (f *fakeScheduler) fire() {
 
 func TestScheduleCreateListPauseResumeDelete(t *testing.T) {
 	gdb := testDB(t)
-	mgr := NewScheduleManager(gdb, newFakeScheduler(), 30*time.Second)
+	mgr := NewScheduleManager(gdb, newFakeScheduler(), 30*time.Second, nil)
 
 	ts := &model.TestSet{Name: "ts", OwnerID: 1}
 	if err := gdb.Create(ts).Error; err != nil {
@@ -132,7 +132,7 @@ func TestScheduleCreateListPauseResumeDelete(t *testing.T) {
 
 func TestScheduleInvalidCronRejected(t *testing.T) {
 	gdb := testDB(t)
-	mgr := NewScheduleManager(gdb, newFakeScheduler(), 30*time.Second)
+	mgr := NewScheduleManager(gdb, newFakeScheduler(), 30*time.Second, nil)
 	ts := &model.TestSet{Name: "ts", OwnerID: 1}
 	if err := gdb.Create(ts).Error; err != nil {
 		t.Fatalf("create test set: %v", err)
@@ -149,7 +149,7 @@ func TestScheduleInvalidCronRejected(t *testing.T) {
 func TestScheduleTriggerRunsEnabledVersion(t *testing.T) {
 	gdb := testDB(t)
 	backend := newFakeScheduler()
-	mgr := NewScheduleManager(gdb, backend, 30*time.Second)
+	mgr := NewScheduleManager(gdb, backend, 30*time.Second, nil)
 
 	flowID, _ := setupFlow(t, gdb, "http://example.com")
 	v, _, err := SaveAndEnable(gdb, flowID, 1)
@@ -165,7 +165,7 @@ func TestScheduleTriggerRunsEnabledVersion(t *testing.T) {
 	// Simulate cron firing.
 	backend.fire()
 
-	logs, err := ListRuns(gdb, flowID)
+	logs, _, err := ListRuns(gdb, flowID, 1, 20)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestScheduleTriggerRunsEnabledVersion(t *testing.T) {
 func TestScheduleTriggerSkipsPaused(t *testing.T) {
 	gdb := testDB(t)
 	backend := newFakeScheduler()
-	mgr := NewScheduleManager(gdb, backend, 30*time.Second)
+	mgr := NewScheduleManager(gdb, backend, 30*time.Second, nil)
 
 	flowID, _ := setupFlow(t, gdb, "http://example.com")
 	if _, _, err := SaveAndEnable(gdb, flowID, 1); err != nil {
@@ -200,7 +200,7 @@ func TestScheduleTriggerSkipsPaused(t *testing.T) {
 
 	backend.fire()
 
-	logs, err := ListRuns(gdb, flowID)
+	logs, _, err := ListRuns(gdb, flowID, 1, 20)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}

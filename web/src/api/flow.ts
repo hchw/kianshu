@@ -116,12 +116,63 @@ export interface RunLog {
   finished_at: string
 }
 
-export async function listRuns(flowID: number) {
-  const { data } = await api.get<{ runs: RunLog[] }>(`/flow/flows/${flowID}/runs`)
-  return data.runs
+export async function listRuns(flowID: number, page = 1, pageSize = 20) {
+  const { data } = await api.get<{ runs: RunLog[]; total: number; page: number; page_size: number }>(
+    `/flow/flows/${flowID}/runs`,
+    { params: { page, page_size: pageSize } },
+  )
+  return data
 }
 
 export async function getRun(flowID: number, runID: number) {
   const { data } = await api.get<RunLog>(`/flow/flows/${flowID}/runs/${runID}`)
   return data
+}
+
+/** SSE connection that streams new execution logs in real time. */
+export function subscribeRuns(
+  flowID: number,
+  onRun: (run: RunLog) => void,
+): { close: () => void } {
+  const controller = new AbortController()
+  const token = localStorage.getItem('kianshu_token') ?? ''
+
+  const run = async () => {
+    try {
+      const resp = await fetch(`/api/flow/flows/${flowID}/runs/subscribe`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'text/event-stream',
+        },
+        signal: controller.signal,
+      })
+      if (!resp.ok || !resp.body) return
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let idx: number
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const frame = buf.slice(0, idx)
+          buf = buf.slice(idx + 2)
+          for (const line of frame.split('\n')) {
+            if (!line.startsWith('data: ')) continue
+            const payload = line.slice(6)
+            try {
+              onRun(JSON.parse(payload))
+            } catch {
+              // ignore non-JSON
+            }
+          }
+        }
+      }
+    } catch {
+      // connection closed or aborted
+    }
+  }
+  run()
+  return { close: () => controller.abort() }
 }

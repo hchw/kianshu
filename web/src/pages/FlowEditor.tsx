@@ -7,6 +7,7 @@ import {
   listRuns,
   listVersions,
   saveEnable,
+  subscribeRuns,
   updateDraft,
   validateDraft,
   type Draft,
@@ -40,6 +41,9 @@ export default function FlowEditor() {
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [versions, setVersions] = useState<FlowVersion[]>([])
   const [runs, setRuns] = useState<RunLog[]>([])
+  const [runsTotal, setRunsTotal] = useState(0)
+  const [runsPage, setRunsPage] = useState(1)
+  const runsPageSize = 20
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [sideOpen, setSideOpen] = useState(() => localStorage.getItem('kianshu_side_open') !== '0')
   const toggleSide = () =>
@@ -56,7 +60,10 @@ export default function FlowEditor() {
       setDraft(d)
       setTree(parseTree(d.tree))
       setVersions((await listVersions(fid)) || [])
-      setRuns((await listRuns(fid)) || [])
+      const runsResp = await listRuns(fid, 1, runsPageSize)
+      setRuns(runsResp.runs || [])
+      setRunsTotal(runsResp.total || 0)
+      setRunsPage(1)
     } catch (e) {
       setErr(apiError(e))
     }
@@ -68,6 +75,31 @@ export default function FlowEditor() {
       .then(setProviders)
       .catch(() => setProviders([]))
   }, [load])
+
+  // SSE: subscribe to real-time run updates
+  useEffect(() => {
+    const sub = subscribeRuns(fid, (run) => {
+      setRuns((prev) => {
+        // Avoid duplicate: the run we just triggered via trialRun/runVersion
+        // may also come through SSE, so dedup by id.
+        if (prev.some((r) => r.id === run.id)) return prev
+        return [run, ...prev]
+      })
+      setRunsTotal((t) => t + 1)
+    })
+    return () => sub.close()
+  }, [fid])
+
+  const loadRunsPage = async (p: number) => {
+    setRunsPage(p)
+    try {
+      const resp = await listRuns(fid, p, runsPageSize)
+      setRuns(resp.runs || [])
+      setRunsTotal(resp.total || 0)
+    } catch (e) {
+      setErr(apiError(e))
+    }
+  }
 
   const onTreeChange = (t: FlowTree) => {
     treeRef.current = t
@@ -220,9 +252,15 @@ export default function FlowEditor() {
             <ResultsPanel
               flowID={fid}
               runs={runs}
+              totalRuns={runsTotal}
+              page={runsPage}
+              pageSize={runsPageSize}
               versions={versions}
+              onPageChange={loadRunsPage}
               onChanged={async () => {
-                setRuns(await listRuns(fid))
+                const resp = await listRuns(fid, runsPage, runsPageSize)
+                setRuns(resp.runs || [])
+                setRunsTotal(resp.total || 0)
               }}
               onRestore={restoreTree}
             />

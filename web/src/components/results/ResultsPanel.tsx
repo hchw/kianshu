@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { FlowVersion, RunLog } from '../../api/flow'
 import { getRun, getVersion, runVersion, trialRun } from '../../api/flow'
 import { apiError } from '../../api/client'
@@ -10,7 +11,11 @@ import { History } from 'lucide-react'
 interface Props {
   flowID: number
   runs: RunLog[]
+  totalRuns: number
+  page: number
+  pageSize: number
   versions: FlowVersion[]
+  onPageChange: (page: number) => void
   onChanged: () => void
   onRestore: (tree: string) => void
 }
@@ -23,11 +28,33 @@ interface NodeResult {
   error?: string
 }
 
-export default function ResultsPanel({ flowID, runs, versions, onChanged, onRestore }: Props) {
+interface PopoverState {
+  run: RunLog
+  x: number
+  y: number
+  detail: NodeResult[]
+  loading: boolean
+}
+
+export default function ResultsPanel({
+  flowID,
+  runs,
+  totalRuns,
+  page,
+  pageSize,
+  versions,
+  onPageChange,
+  onChanged,
+  onRestore,
+}: Props) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [latest, setLatest] = useState<NodeResult[]>([])
-  const [detail, setDetail] = useState<RunLog | null>(null)
+  const [popover, setPopover] = useState<PopoverState | null>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  // 标记刚打开的弹窗，让同一次点击产生的 mousedown 不要立即关掉它
+  const skipCloseRef = useRef(false)
+
+  const totalPages = Math.max(1, Math.ceil(totalRuns / pageSize))
 
   const run = async (fn: () => Promise<unknown>) => {
     setErr('')
@@ -43,18 +70,32 @@ export default function ResultsPanel({ flowID, runs, versions, onChanged, onRest
   }
 
   const trial = () => run(() => trialRun(flowID))
-
   const runVer = (v: FlowVersion) => run(() => runVersion(flowID, v.version_no))
 
-  const loadRun = useCallback(async (r: RunLog) => {
-    try {
-      const full = await getRun(flowID, r.id)
-      setDetail(full)
-      setLatest(parseNodeResults(full.node_results))
-    } catch (e) {
-      setErr(apiError(e))
-    }
-  }, [flowID])
+  const loadRunDetail = useCallback(
+    async (r: RunLog, anchorEl: HTMLElement) => {
+      const rect = anchorEl.getBoundingClientRect()
+      // 弹窗显示在记录左侧，垂直居中对齐该行
+      const x = rect.left - 376 // 360px 宽度 + 16px 间距
+      const y = rect.top + rect.height / 2
+      skipCloseRef.current = true
+      setPopover({ run: r, x, y, detail: [], loading: true })
+      try {
+        const full = await getRun(flowID, r.id)
+        setPopover((prev) =>
+          prev?.run.id === r.id
+            ? { ...prev, detail: parseNodeResults(full.node_results), loading: false }
+            : prev,
+        )
+      } catch (e) {
+        setPopover((prev) =>
+          prev?.run.id === r.id ? { ...prev, detail: [], loading: false } : prev,
+        )
+        setErr(apiError(e))
+      }
+    },
+    [flowID],
+  )
 
   const restoreVer = async (v: FlowVersion) => {
     try {
@@ -69,9 +110,24 @@ export default function ResultsPanel({ flowID, runs, versions, onChanged, onRest
     if (r.tree) onRestore(r.tree)
   }
 
+  // 点击弹窗外部关闭（但点击 run-row 时不关，让行自己的 onClick 处理）
   useEffect(() => {
-    if (runs.length > 0) loadRun(runs[0])
-  }, [runs, loadRun])
+    if (!popover) return
+    const handler = (e: MouseEvent) => {
+      if (skipCloseRef.current) {
+        skipCloseRef.current = false
+        return
+      }
+      const target = e.target as HTMLElement
+      // 点击其他 run-row：不关闭，让 click 事件切换选中行
+      if (target.closest('.run-row')) return
+      // 点击弹窗内部：不关闭
+      if (popoverRef.current?.contains(target)) return
+      setPopover(null)
+    }
+    document.addEventListener('mousedown', handler, true)
+    return () => document.removeEventListener('mousedown', handler, true)
+  }, [popover])
 
   const createBadge = (status: string) => (
     <span className={`badge ${statusBadge(status)}`}>{statusLabel(status)}</span>
@@ -102,43 +158,101 @@ export default function ResultsPanel({ flowID, runs, versions, onChanged, onRest
           ))}
         </div>
       )}
-      <div className="muted">历史执行</div>
+      <div className="muted">
+        历史执行
+        {totalRuns > 0 && (
+          <span style={{ marginLeft: 8 }}>
+            ({totalRuns}条)
+          </span>
+        )}
+      </div>
       <div className="list">
         {runs.map((r) => (
-          <div key={r.id} className="run-row" onClick={() => loadRun(r)}>
-            {createBadge(r.status)} <span className="mono">v{r.version_no || '草稿'}</span>
+          <div
+            key={r.id}
+            className="run-row"
+            onClick={(e) => loadRunDetail(r, e.currentTarget)}
+          >
+            {createBadge(r.status)}{' '}
+            <span className="mono">v{r.version_no || '草稿'}</span>
             <span className="muted">{new Date(r.started_at).toLocaleTimeString()}</span>
-            <button className="link" onClick={(e) => { e.stopPropagation(); restoreRun(r) }}>
+            <button
+              className="link"
+              onClick={(e) => {
+                e.stopPropagation()
+                restoreRun(r)
+              }}
+            >
               恢复
             </button>
           </div>
         ))}
         {runs.length === 0 && (
-          <EmptyState compact icon={<History size={20} strokeWidth={1.5} aria-hidden="true" />} title="暂无执行" />
+          <EmptyState
+            compact
+            icon={<History size={20} strokeWidth={1.5} aria-hidden="true" />}
+            title="暂无执行"
+          />
         )}
       </div>
-      {latest.length > 0 && (
-        <div className="badges">
-          {latest.map((n) => (
-            <span
-              key={n.node_id}
-              className={`badge ${n.status} clickable`}
-              title={JSON.stringify({ input: n.input, output: n.output, error: n.error })}
-              onClick={() => setDetail(detail && { ...detail })}
-            >
-              {n.node_id} {createBadge(n.status)}
-            </span>
-          ))}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="pagination">
+          <button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+            上一页
+          </button>
+          <span className="muted">
+            {page}/{totalPages}
+          </span>
+          <button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+            下一页
+          </button>
         </div>
       )}
-      {detail && (
-        <div className="card sub">
-          <div className="strong">执行日志 #{detail.id}</div>
-          <div className="mono small">
-            {JSON.stringify(parseNodeResults(detail.node_results), null, 2)}
-          </div>
-        </div>
-      )}
+
+      {/* 弹窗通过 Portal 渲染到 body，彻底避开卡片 transform 导致的 fixed 定位偏移 */}
+      {popover &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            className="run-popover"
+            style={{
+              left: Math.max(8, popover.x),
+              top: Math.max(8, Math.min(popover.y - 200, window.innerHeight - 440)),
+            }}
+          >
+            <div className="run-popover-head">
+              <span className="strong">执行日志 #{popover.run.id}</span>
+              <button className="link" onClick={() => setPopover(null)}>
+                ✕
+              </button>
+            </div>
+            {popover.loading ? (
+              <div className="muted" style={{ padding: 8 }}>加载中...</div>
+            ) : popover.detail.length > 0 ? (
+              <div className="log-box">
+                {popover.detail.map((n) => (
+                  <div key={n.node_id} className="run-row">
+                    {createBadge(n.status)}
+                    <span className="mono" style={{ fontSize: 11 }}>{n.node_id}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="muted" style={{ padding: 8 }}>无节点结果</div>
+            )}
+            <details style={{ marginTop: 4 }}>
+              <summary className="muted" style={{ fontSize: 11, cursor: 'pointer' }}>
+                原始数据
+              </summary>
+              <pre className="mono" style={{ fontSize: 10, maxHeight: 180, overflow: 'auto' }}>
+                {JSON.stringify(popover.detail, null, 2)}
+              </pre>
+            </details>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
