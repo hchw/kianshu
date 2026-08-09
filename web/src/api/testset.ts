@@ -50,8 +50,29 @@ export async function updateTestSet(id: number, host: string) {
   return data
 }
 
+export interface MemberView {
+  user_id: number
+  username: string
+  role: string
+}
+
+export interface UserBrief {
+  id: number
+  username: string
+}
+
+export async function listMembers(testSetID: number) {
+  const { data } = await api.get<{ owner: MemberView; members: MemberView[] }>(`/test-sets/${testSetID}/members`)
+  return data
+}
+
+export async function searchUsers(testSetID: number, q: string) {
+  const { data } = await api.get<{ users: UserBrief[] }>(`/test-sets/${testSetID}/members/search`, { params: { q } })
+  return data.users
+}
+
 export async function addMember(testSetID: number, userID: number, role: string) {
-  const { data } = await api.post(`/test-sets/${testSetID}/members`, { user_id: userID, role })
+  const { data } = await api.post<MemberView>(`/test-sets/${testSetID}/members`, { user_id: userID, role })
   return data
 }
 

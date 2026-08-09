@@ -1,6 +1,6 @@
 <div align="center">
 
-![鉴枢](kianshu.png)
+![鉴枢](web/public/kianshu.png)
 
 # 鉴枢 (kianshu)
 

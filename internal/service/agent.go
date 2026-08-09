@@ -137,6 +137,8 @@ func systemPrompt(mode Mode) string {
 2. 边界覆盖——正常流只是起点
    - 每个 API 调用都应考虑：空值入参、超时、非 2xx 响应、
      权限不足（403）、资源不存在（404）
+   - api 节点只要网络请求成功(无连接/超时错误)就视为通过,
+     即使返回 4xx/5xx 也不会失败——状态码校验由断言节点负责
    - 对可能失败的节点用 try/catch 包裹，提供 fallback
    - 业务关键路径至少覆盖：正常场景 + 参数边界 + 异常降级
    - 数据依赖链（如"登录取 token → 用 token 调业务 API"）
@@ -162,14 +164,72 @@ func systemPrompt(mode Mode) string {
 
 节点类型:start、api(引用测试单元,unit_id 来自 list_units)、
 assert、loop、try、catch、cache-set、adapter(JSONata 转换)。
+
+【API 响应信封】api 节点执行成功时输出固定信封格式:
+{"status_code": <http状态码浮点数>, "body": <响应体JSON或字符串>}
+下游节点通过 body.xxx 访问响应字段,通过 status_code 访问状态码。
+例如:缓存写入表达式需从 token 改为 body.token;
+断言字段需从 token 改为 body.token。
+
+【断言节点】config 格式: {"assertions": [{"field": "字段路径", "op": "eq|ne|contains|gt|lt", "expected": 期望值}]}
+field 支持点分隔路径如 status_code、body.token、body.0.name。
+常用场景:校验 status_code==200/401/404,校验 body.token 非空(ne ""),
+校验 body.data 为数组(通过 adapter+JSONata 的 $type() 或 $count())。
+
 cache-set 写入共享缓存:必须作为 $cache.xxx reader 的祖先节点——
 把 reader 挂在 cache-set 之下(结构:login → cache-set → reader)。
 执行顺序由"父先于子"天然保证,cache-set 先写、reader 后读,
 不要依赖同级兄弟排序(同级排序不可靠)。
-其 config 必须(MUST)为 {"writes": {"<缓存key>": "<jsonata>"}},
-如 {"writes": {"token": "token"}}——writes 的键是要写入的缓存 key,
-值是对该 cache-set 父节点输出求值的 JSONata 表达式
-(父节点输出含 token 字段则写 "token")。
+其 config 包含 writes 映射,格式为:
+{"writes": {"<缓存key>": <值>}, "static": {"<key>": <固定值>}}
+
+writes 的值分三种情况:
+- 字符串 → JSONata 表达式,对父节点输出求值,如 "body.token"
+- 非字符串(数字/布尔/数组/对象) → 直接当字面量写入缓存
+- 需写入固定字符串时,将值放入 static,表达式用 $static.xxx 引用
+
+示例——同时写入动态 token 和固定 invalid_auth:
+{"writes": {"token": "body.token", "invalid_auth": "$static.bad_token"},
+ "static": {"bad_token": "fake_invalid_token_12345"}}
+
+【adapter 节点】config 为 {"expr": "<JSONata 表达式>"}。
+若父节点是 api 信封,表达式需用 body.xxx 访问响应字段:
+{"expr": "$.body.token"}、{"expr": "$count($.body.items)"}。
+
+【loop 节点】config 为 {"input": "<数组字段>", "var": "<迭代变量>"}。
+若父节点是 api 信封,数组在 body 下:{"input": "body.items", "var": "item"}。
+
+【try/catch 节点——包裹异常保护】
+操作原则:在目标节点上级插入 try,再把目标节点挪到 try 下,
+目标节点原来的下级挪到 catch 下,catch 挂在目标节点下。
+
+示例:parent → nodeA → child1 → child2,要对 nodeA 加 try/catch:
+
+第一步:create_node try,挂到 nodeA 的原父节点下:
+{"id":"n_try1","type":"try","parent":"<parent>"}
+
+第二步:link_nodes 把 nodeA 从原父节点改链到 try 下:
+{"parent":"n_try1","child":"nodeA"}
+// 此时树:parent → try → nodeA → child1 → child2
+
+第三步:create_node catch,挂在目标节点(nodeA)下,带 fallback:
+{"id":"n_catch1","type":"catch","parent":"nodeA","config":{"fallback":{}}}
+// 此时树:parent → try → nodeA → child1 → child2
+//                             → catch
+
+第四步:link_nodes 把 nodeA 的原下级(child1)挪到 catch 下:
+{"parent":"n_catch1","child":"child1"}
+// child2 会跟随 child1 自动移动(它是 child1 的子节点)
+// 最终:parent → try → nodeA → catch → child1 → child2
+
+关键顺序:一定要先 link_nodes 挪被保护节点到 try 下,再 create_node catch。
+catch 挂在 nodeA 下自然排在现有子节点之后,不会触发 catch_unreachable。
+
+catch 节点 config 格式: {"fallback": <任意JSON值>}。
+fallback 是 try 子树失败时 catch 产出的降级值。
+catch 的子节点在成功路径上会收到被保护节点的输出,
+在失败路径上会收到 fallback——数据链自动保持。
+
 每次修改后调用 validate_flow 校验；校验失败时根据返回的
 expected_format 修正(可插 adapter 转换参数、加 cache-set 存 token)。`
 	if mode == ModeGenerate {
@@ -185,8 +245,10 @@ expected_format 修正(可插 adapter 转换参数、加 cache-set 存 token)。
 get_flow 中 start 节点的实际 id):
 登录节点(公开单元,如 POST /auth/login):
 {"id":"n_login","type":"api","parent":"<start-id>","inputs":{"username":{"type":"string","source":"username"},"password":{"type":"string","source":"password"}},"config":{"unit_id":<登录unit_id>}}
-缓存节点(挂在登录节点下,把 token 写入共享缓存):
-{"id":"n_cache_token","type":"cache-set","parent":"n_login","config":{"writes":{"token":"token"}}}
+缓存节点(挂在登录节点下,把 token 从信封 body 写入共享缓存):
+{"id":"n_cache_token","type":"cache-set","parent":"n_login","config":{"writes":{"token":"body.token"}}}
+断言登录成功(挂在登录节点下,与缓存节点同级):
+{"id":"n_assert_login","type":"assert","parent":"n_login","config":{"assertions":[{"field":"status_code","op":"eq","expected":200}]}}
 受保护节点(auth 输入引用缓存,必须挂在 cache-set 之下作为其子节点):
 {"id":"n_list","type":"api","parent":"n_cache_token","inputs":{"auth":{"type":"string","source":"$cache.token"}},"config":{"unit_id":<受保护unit_id>}}`
 	}
@@ -224,7 +286,7 @@ func toolSchemas() []openai.Tool {
 			Type: "function",
 			Function: openai.ToolFunction{
 				Name:        toolCreateNode,
-				Description: "创建节点。type: start|api|assert|loop|try|catch|cache-set|adapter。api 需带 unit_id,建议同时声明 inputs(参数键与类型)和 config.params(执行参数值键值对)。cache-set 需连到数据来源的上游节点,其 config 形状为 {\"writes\": {\"<缓存key>\": \"<jsonata,对父节点输出求值>\"}},如 {\"writes\": {\"token\": \"token\"}}。",
+				Description: "创建节点。type: start|api|assert|loop|try|catch|cache-set|adapter。api 需带 unit_id,建议同时声明 inputs(参数键与类型)和 config.params(执行参数值键值对)。api 响应为信封 {\"status_code\":N,\"body\":...},cache-set 需连到数据来源的上游节点,config 的 writes 值:字符串走 JSONata 求值(如 body.token)、非字符串直接当字面量、固定字符串放 static 用 $static.xxx 引用,如 {\"writes\":{\"token\":\"body.token\",\"invalid\":\"$static.bad\"},\"static\":{\"bad\":\"fake_token\"}}。adapter 若接 api 信封需用 $.body.xxx 访问字段。assert 节点 config 形状为 {\"assertions\":[{\"field\":\"status_code|body.xxx\",\"op\":\"eq|ne|contains|gt|lt\",\"expected\":期望值}]}。loop 若接 api 信封,input 指向 body.xxx。",
 				Parameters: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"type":{"type":"string"},"parent":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id","type"],"additionalProperties":false}`),
 			},
 		},
@@ -232,7 +294,7 @@ func toolSchemas() []openai.Tool {
 			Type: "function",
 			Function: openai.ToolFunction{
 				Name:        toolUpdateNode,
-				Description: "更新节点的 inputs/outputs 或 config。cache-set 的 config 形状为 {\"writes\": {\"<缓存key>\": \"<jsonata,对父节点输出求值>\"}},如 {\"writes\": {\"token\": \"token\"}}。",
+				Description: "更新节点的 inputs/outputs 或 config。cache-set 的 config 格式:{ \"writes\": { \"<缓存key>\": <值> }, \"static\": { \"<key>\": <固定字符串> } },writes 值:字符串→JSONata 表达式求值,非字符串→字面量,字符串字面量用 static+$static.xxx。",
 				Parameters: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id"],"additionalProperties":false}`),
 			},
 		},
@@ -369,7 +431,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 			break
 		}
 		log.Infof("agent: flow=%d round=%d LLM 发起 %d 个工具调用", flowID, round, len(msg.ToolCalls))
-		for _, tc := range msg.ToolCalls {
+		for tcIdx, tc := range msg.ToolCalls {
 			log.Infof("agent: flow=%d round=%d tool=%s args=%s", flowID, round, tc.Function.Name, tc.Function.Arguments)
 			result := ExecTool(toolCtx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 			log.Infof("agent: flow=%d round=%d tool=%s 结果 ok=%v err=%s paused=%v", flowID, round, tc.Function.Name, result.OK, result.Error, result.Paused)
@@ -379,6 +441,17 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 				// 回填 tool_call_id，resumeScopePause 回复工具结果时需要
 				for i := range result.Questions {
 					result.Questions[i].ToolCallID = tc.ID
+				}
+				// 为当前及后续所有未执行的工具调用添加占位 tool 消息，
+				// 确保保存的消息历史对 LLM API 合法
+				// （OpenAI 要求每条 assistant(tool_calls) 后必须
+				//  跟随对应数量的 tool 消息）
+				for _, rt := range msg.ToolCalls[tcIdx:] {
+					req.Messages = append(req.Messages, openai.Message{
+						Role:       "tool",
+						ToolCallID: rt.ID,
+						Content:    strPtr(`{"ok":false,"error":"工具调用已暂停等待用户确认","paused":true}`),
+					})
 				}
 				if b, err := json.Marshal(req.Messages[1:]); err == nil {
 					session.Messages = string(b)

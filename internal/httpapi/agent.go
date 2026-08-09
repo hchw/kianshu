@@ -364,13 +364,75 @@ func (s *Server) handleAgentResume(c *gin.Context) {
 		writeErr(c, http.StatusConflict, service.ErrSessionBusy.Error())
 		return
 	}
+
+	if isSSE(c) {
+		// SSE 模式：流式推送恢复后的 agent 执行进度
+		s.resumeSSE(c, flowID, req, provider, unlock)
+		return
+	}
 	defer unlock()
-	result, err := service.ResumeGeneration(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Answers, provider)
+
+	// 非 SSE：同步返回结果
+	var events []service.Event
+	result, err := service.ResumeGeneration(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Answers, provider, service.AgentHooks{Emit: func(ev service.Event) {
+		events = append(events, ev)
+	}})
 	if err != nil {
 		writeErr(c, http.StatusInternalServerError, "继续生成失败: "+err.Error())
 		return
 	}
+	// 仅保留 tool 事件
+	toolEvents := events[:0]
+	for _, ev := range events {
+		if ev.Kind == "" || ev.Kind == service.EventKindTool {
+			toolEvents = append(toolEvents, ev)
+		}
+	}
+	if len(toolEvents) > 0 {
+		result.Events = toolEvents
+	}
 	writeJSON(c, http.StatusOK, result)
+}
+
+// resumeSSE streams agent resume progress over SSE, following the same pattern
+// as submitSSE.
+func (s *Server) resumeSSE(c *gin.Context, flowID uint, req agentResumeReq, provider service.ChatProvider, unlock func()) {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Flush()
+
+	ctx := c.Request.Context()
+	stream := make(chan service.Event, 64)
+	done := make(chan error, 1)
+	go func() {
+		defer unlock()
+		defer s.AgentBus.MarkDone(flowID)
+		_, err := service.ResumeGeneration(ctx, s.DB, flowID, currentUserID(c), req.Answers, provider, service.AgentHooks{Emit: func(ev service.Event) {
+			s.AgentBus.Push(flowID, ev)
+			select {
+			case stream <- ev:
+			case <-ctx.Done():
+			}
+		}})
+		done <- err
+	}()
+
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case ev := <-stream:
+			data, _ := json.Marshal(ev)
+			io.WriteString(w, "data: "+string(data)+"\n\n")
+			return true
+		case err := <-done:
+			if err != nil {
+				log.Errorf("agent: resumeSSE flow=%d 执行失败: %v", flowID, err)
+				io.WriteString(w, "event: error\ndata: "+jsonString(err.Error())+"\n\n")
+			}
+			io.WriteString(w, "data: [DONE]\n\n")
+			return false
+		}
+	})
 }
 
 // handleAgentNew resets a flow's dialog session.

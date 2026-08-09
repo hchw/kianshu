@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentEvent, AgentSession, PauseAnswer, PauseQuestion } from '../../api/agent'
-import { agentCompress, agentNew, agentResume, agentSession } from '../../api/agent'
+import { agentCompress, agentNew, agentSession } from '../../api/agent'
 import { apiError } from '../../api/client'
 import type { FlowTree } from '../../api/flow'
 import type { Provider } from '../../api/providers'
@@ -259,19 +259,91 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
     })
   }
 
-  const resume = async (answers: PauseAnswer[]) => {
-    setBusy(true)
-    setErr('')
-    try {
-      const res = await agentResume(flowID, providerID, answers)
-      setEvents(res.events)
-      await refreshSession()
-      onChanged()
-    } catch (e) {
-      setErr(apiError(e))
-    } finally {
-      setBusy(false)
+  const resume = (answers: PauseAnswer[]) => {
+    if (!providerID) {
+      setErr('请先在 Provider 配置中启用一个 LLM Provider')
+      return
     }
+    setErr('')
+    setBusy(true)
+    setEvents([])
+    setRoundTexts({})
+    setLiveRound(null)
+    setLiveText('')
+    liveRoundRef.current = null
+    liveTextRef.current = ''
+    scrollBottom()
+
+    // 深克隆当前树作为快照，用于失败/中止/断连时恢复
+    const snapshot: FlowTree = JSON.parse(JSON.stringify(tree))
+    let workingTree: FlowTree = snapshot
+
+    const url = `/api/flow/flows/${flowID}/agent/resume`
+    abortRef.current = openSSE(url, { provider_id: providerID, answers }, {
+      onEvent: (ev) => {
+        if (ev.kind === 'round') {
+          liveRoundRef.current = ev.round
+          liveTextRef.current = ''
+          setLiveRound(ev.round)
+          setLiveText('')
+        } else if (ev.kind === 'text') {
+          liveTextRef.current += ev.text ?? ''
+          if (liveRoundRef.current != null) {
+            setLiveRound(liveRoundRef.current)
+            setLiveText(liveTextRef.current)
+          }
+        } else {
+          // tool event – finalize this round's accumulated assistant text
+          if (liveRoundRef.current != null && liveTextRef.current) {
+            setRoundTexts((r) => ({ ...r, [liveRoundRef.current!]: liveTextRef.current }))
+          }
+          liveRoundRef.current = null
+          liveTextRef.current = ''
+          setLiveRound(null)
+          setLiveText('')
+          setEvents((cur) => [...cur, ev])
+
+          // 变异类工具事件 → 本地回放到画布
+          if (ev.tool && ev.result) {
+            const next = applyToolMutation(workingTree, ev)
+            if (next !== workingTree) {
+              workingTree = next
+              onTreePreview(next)
+            }
+          }
+        }
+        scrollBottom()
+      },
+      onDone: async () => {
+        setLiveRound(null)
+        setLiveText('')
+        liveRoundRef.current = null
+        liveTextRef.current = ''
+        setBusy(false)
+        await refreshSession()
+        onChanged()
+      },
+      onError: (msg) => {
+        setErr(msg)
+        setBusy(false)
+        onTreePreview(snapshot)
+      },
+      onDisconnect: () => {
+        setErr('连接中断,可重试;会话历史已保留,恢复上下文。')
+        setBusy(false)
+        onTreePreview(snapshot)
+      },
+      onAbort: async () => {
+        setLiveRound(null)
+        setLiveText('')
+        liveRoundRef.current = null
+        liveTextRef.current = ''
+        setBusy(false)
+        onTreePreview(snapshot)
+        await refreshSession()
+        onChanged()
+      },
+    })
   }
 
   const newSession = async () => {

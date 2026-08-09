@@ -351,9 +351,16 @@ func execLinkNodes(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 		return toolError("", "连线会造成环路: %s 已是 %s 的后代", a.Parent, a.Child)
 	}
 	if cn.Parent != "" && cn.Parent != a.Parent {
-		return toolError("", "节点 %s 已有父节点 %s,请先删除连线或改传其父节点", a.Child, cn.Parent)
+		// 允许重新设父节点(如 try/catch 包裹时需要):从旧父节点的 children 列表中移除,
+		// 再挂到新父节点下。IsDescendant 检查已防止环路。
+		if oldParent, ok := ctx.Tree.Nodes[cn.Parent]; ok {
+			oldParent.Children = removeString(oldParent.Children, a.Child)
+		}
 	}
 	ctx.Tree.AddChild(a.Parent, a.Child)
+	// 从 parent 指针全量重建 children 列表,消除旧父节点残留的连线,
+	// 避免前端在下一次 get_flow 时看到短暂环路。
+	ctx.Tree.ReconcileChildren()
 	return &ToolResult{OK: true, Data: map[string]any{
 		"parent_io": nodeIO(pn),
 		"child_io":  nodeIO(cn),

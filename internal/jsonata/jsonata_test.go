@@ -52,4 +52,28 @@ func TestEval(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+
+	t.Run("EvalWithVars $static", func(t *testing.T) {
+		v, err := EvalWithVars("$static.msg",
+			map[string]any{"body": map[string]any{"token": "abc"}},
+			map[string]interface{}{"static": map[string]interface{}{"msg": "hello"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if v != "hello" {
+			t.Fatalf("unexpected value: %v, want hello", v)
+		}
+	})
+
+	t.Run("EvalWithVars $static with body access", func(t *testing.T) {
+		v, err := EvalWithVars("$static.prefix & '-' & body.token",
+			map[string]any{"body": map[string]any{"token": "abc"}},
+			map[string]interface{}{"static": map[string]interface{}{"prefix": "bearer"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if v != "bearer-abc" {
+			t.Fatalf("unexpected value: %v, want bearer-abc", v)
+		}
+	})
 }

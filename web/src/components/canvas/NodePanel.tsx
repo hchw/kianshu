@@ -180,28 +180,19 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
         )
       case 'adapter':
         return (
-          <label>
-            expr (JSONata)
-            <textarea rows={3} value={(config.expr as string) ?? ''} onChange={(e) => setKV('expr', e.target.value)} />
-          </label>
+          <>
+            <label>
+              expr (JSONata)
+              <textarea rows={3} value={(config.expr as string) ?? ''} onChange={(e) => setKV('expr', e.target.value)} />
+            </label>
+            <div className="muted small">
+              若上游是 API 节点,响应为信封 {'{'}"status_code":200,"body":...{'}'}。
+              用 $.body.xxx 访问响应字段,如 $.body.token、$count($.body.items)。
+            </div>
+          </>
         )
       case 'assert':
-        return (
-          <label>
-            assertions (JSON)
-            <textarea
-              rows={6}
-              value={config.assertions ? JSON.stringify(config.assertions) : '[]'}
-              onChange={(e) => {
-                try {
-                  setKV('assertions', JSON.parse(e.target.value))
-                } catch {
-                  /* keep last valid */
-                }
-              }}
-            />
-          </label>
-        )
+        return <AssertEditor config={config} onChange={setKV} />
       case 'loop':
         return (
           <>
@@ -233,20 +224,42 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
         )
       case 'cache-set':
         return (
-          <label>
-            writes (JSON: key → jsonata expr)
-            <textarea
-              rows={5}
-              value={config.writes ? JSON.stringify(config.writes) : '{}'}
-              onChange={(e) => {
-                try {
-                  setKV('writes', JSON.parse(e.target.value))
-                } catch {
-                  /* keep last valid */
-                }
-              }}
-            />
-          </label>
+          <>
+            <label>
+              writes (JSON: key → value)
+              <textarea
+                rows={5}
+                value={config.writes ? JSON.stringify(config.writes) : '{}'}
+                onChange={(e) => {
+                  try {
+                    setKV('writes', JSON.parse(e.target.value))
+                  } catch {
+                    /* keep last valid */
+                  }
+                }}
+              />
+            </label>
+            <label>
+              static (JSON, 固定字符串值)
+              <textarea
+                rows={3}
+                value={config.static ? JSON.stringify(config.static) : '{}'}
+                onChange={(e) => {
+                  try {
+                    setKV('static', JSON.parse(e.target.value))
+                  } catch {
+                    /* keep last valid */
+                  }
+                }}
+              />
+            </label>
+            <div className="muted small">
+              上游 API 节点输出信封 {'{'}"status_code":200,"body":...{'}'}。
+              value 为字符串 → JSONata 表达式求值(如 "body.token")；
+              非字符串 → 直接当字面量；固定字符串放 static,
+              表达式用 $static.xxx 引用。
+            </div>
+          </>
         )
       case 'start':
         return (
@@ -306,4 +319,98 @@ function tryPretty(s: string): string {
   } catch {
     return s
   }
+}
+
+// ---- AssertEditor 结构化断言编辑器 ----
+
+interface AssertionItem {
+  field: string
+  op: string
+  expected: string
+}
+
+const OP_LABELS: Record<string, string> = {
+  eq: '等于 (==)',
+  ne: '不等于 (!=)',
+  contains: '包含',
+  gt: '大于 (>)',
+  lt: '小于 (<)',
+}
+
+const FIELD_SUGGESTIONS = ['status_code', 'body.']
+
+function AssertEditor({
+  config,
+  onChange,
+}: {
+  config: Record<string, unknown>
+  onChange: (field: string, value: unknown) => void
+}) {
+  const raw = Array.isArray(config.assertions) ? (config.assertions as AssertionItem[]) : []
+
+  const setItems = (items: AssertionItem[]) => onChange('assertions', items)
+
+  const update = (i: number, patch: Partial<AssertionItem>) => {
+    const next = raw.map((item, idx) => (idx === i ? { ...item, ...patch } : item))
+    setItems(next)
+  }
+
+  const add = () => setItems([...raw, { field: 'status_code', op: 'eq', expected: '200' }])
+  const remove = (i: number) => setItems(raw.filter((_, idx) => idx !== i))
+
+  return (
+    <div className="assert-editor">
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="muted small">断言列表</span>
+        <button className="link small" onClick={add}>
+          + 添加断言
+        </button>
+      </div>
+      {raw.length === 0 && <p className="muted small">暂无断言,API 节点仅验证网络请求是否成功</p>}
+      {raw.map((a, i) => (
+        <div key={i} className="card sub" style={{ marginTop: 6 }}>
+          <div className="row" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              className="mono small"
+              style={{ width: 120 }}
+              placeholder="字段路径"
+              list="assert-fields"
+              value={a.field}
+              onChange={(e) => update(i, { field: e.target.value })}
+            />
+            <select
+              className="small"
+              value={a.op}
+              onChange={(e) => update(i, { op: e.target.value })}
+            >
+              {Object.entries(OP_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            <input
+              className="mono small"
+              style={{ flex: 1, minWidth: 80 }}
+              placeholder="期望值"
+              value={a.expected}
+              onChange={(e) => update(i, { expected: e.target.value })}
+            />
+            <button className="link danger small" onClick={() => remove(i)}>
+              ✕
+            </button>
+          </div>
+        </div>
+      ))}
+      <datalist id="assert-fields">
+        {FIELD_SUGGESTIONS.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+      <div className="muted small" style={{ marginTop: 6 }}>
+        API 响应信封: {'{'}"status_code": 200, "body": ...{'}'}。字段路径用点分隔,如
+        status_code、body.token、body.0.name。运算符: eq/ne/contains/gt/lt。
+      </div>
+    </div>
+  )
 }

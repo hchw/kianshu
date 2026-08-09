@@ -197,7 +197,11 @@ func generateComplete(ctx context.Context, p ChatProvider, req openai.Completion
 // an answer are listed as explicitly skipped so nothing is silently misapplied.
 // Scope-type pauses are handled by updating the node scope and replaying the
 // intercepted tool call before resuming the LLM loop.
-func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, answers []PauseAnswer, provider ChatProvider) (*AgentResult, error) {
+func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, answers []PauseAnswer, provider ChatProvider, hooks ...AgentHooks) (*AgentResult, error) {
+	h := AgentHooks{}
+	if len(hooks) > 0 {
+		h = hooks[0]
+	}
 	session, err := GetFlowSession(db, flowID, userID)
 	if err != nil {
 		return nil, err
@@ -228,10 +232,10 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 	}
 
 	if hasScope {
-		return resumeScopePause(ctx, db, flowID, session, history, pending, answered, provider)
+		return resumeScopePause(ctx, db, flowID, session, history, pending, answered, provider, h.Emit)
 	}
 	if hasLimit {
-		return resumeLimitPause(ctx, db, flowID, session, history, pending, answered, provider)
+		return resumeLimitPause(ctx, db, flowID, session, history, pending, answered, provider, h.Emit)
 	}
 
 	// 原有的 generate 模式暂停恢复逻辑
@@ -270,6 +274,7 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 		Instruction:    first,
 		Mode:           ModeGenerate,
 		PresetMessages: req.Messages[1:],
+		Emit:           h.Emit,
 	})
 	if err != nil {
 		return nil, err
@@ -283,7 +288,7 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 // resumeScopePause handles a scope-violation pause: process the user's allow/deny
 // answers, update the scope, replay the intercepted tool call, and resume the
 // LLM loop in edit mode.
-func resumeScopePause(ctx context.Context, db *gorm.DB, flowID uint, session *model.FlowSession, history []openai.Message, pending []PauseQuestion, answered map[string]string, provider ChatProvider) (*AgentResult, error) {
+func resumeScopePause(ctx context.Context, db *gorm.DB, flowID uint, session *model.FlowSession, history []openai.Message, pending []PauseQuestion, answered map[string]string, provider ChatProvider, emit func(Event)) (*AgentResult, error) {
 	// 解析草稿树以构建 ToolContext
 	d, err := GetDraft(db, flowID)
 	if err != nil {
@@ -327,9 +332,23 @@ func resumeScopePause(ctx context.Context, db *gorm.DB, flowID uint, session *mo
 	// 重放被拦截的工具调用
 	toolCtx := &ToolContext{DB: db, TestSetID: tsID, Tree: tree, Scope: scope}
 
-	// 扩展消息历史：在已有的 assistant(tool_calls) 之后追加 tool result
-	extended := make([]openai.Message, len(history))
-	copy(extended, history)
+	// 构建暂停 tool_call_id 集合，用于过滤历史中的占位 tool 消息
+	pendingIDs := map[string]bool{}
+	for _, q := range pending {
+		if q.ToolCallID != "" {
+			pendingIDs[q.ToolCallID] = true
+		}
+	}
+
+	// 从历史中移除占位 tool 消息（RunAgent scope 暂停时写入的
+	// {"paused":true} 占位），然后追加真实 tool 结果
+	extended := make([]openai.Message, 0, len(history)+len(pending))
+	for _, m := range history {
+		if m.Role == "tool" && pendingIDs[m.ToolCallID] {
+			continue
+		}
+		extended = append(extended, m)
+	}
 
 	for _, q := range pending {
 		ans, ok := answered[q.ID]
@@ -372,12 +391,13 @@ func resumeScopePause(ctx context.Context, db *gorm.DB, flowID uint, session *mo
 		Mode:           ModeEdit,
 		PresetMessages: extended,
 		ResumeScope:    scope,
+		Emit:           emit,
 	})
 }
 
 // resumeLimitPause handles a round-limit pause: on "继续生成" resume the LLM
 // loop with its full history; on "停止" mark the session active and stop.
-func resumeLimitPause(ctx context.Context, db *gorm.DB, flowID uint, session *model.FlowSession, history []openai.Message, pending []PauseQuestion, answered map[string]string, provider ChatProvider) (*AgentResult, error) {
+func resumeLimitPause(ctx context.Context, db *gorm.DB, flowID uint, session *model.FlowSession, history []openai.Message, pending []PauseQuestion, answered map[string]string, provider ChatProvider, emit func(Event)) (*AgentResult, error) {
 	ans, ok := answered["limit-1"]
 	if !ok || ans == "停止" {
 		session.Status = model.SessionActive
@@ -403,6 +423,7 @@ func resumeLimitPause(ctx context.Context, db *gorm.DB, flowID uint, session *mo
 		Instruction:    "继续生成",
 		Mode:           ModeEdit,
 		PresetMessages: history,
+		Emit:           emit,
 	})
 }
 
@@ -527,7 +548,7 @@ func detectAuthConflicts(units []model.TestUnit, draftTree string) []PauseQuesti
 // static apikey. Returns "" when the tree does not establish an auth approach.
 func treeAuthScheme(tree *flow.Tree) string {
 	var cfg struct {
-		Writes map[string]string `json:"writes"`
+		Writes map[string]any `json:"writes"`
 	}
 	tokenKeys := map[string]bool{}
 	for _, n := range tree.Nodes {

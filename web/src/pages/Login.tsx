@@ -35,9 +35,14 @@ export default function Login() {
 
   return (
     <div className="auth-page">
+      <div className="auth-brand">
+        <img src="/kianshu.png" alt="鉴枢" />
+        <h2>集成测试流编辑器</h2>
+      </div>
+      <div className="auth-form">
       <form className="card auth-card" onSubmit={submit}>
         <h1>鉴枢</h1>
-        <p className="muted">集成测试流编辑器</p>
+        <p className="muted">登录你的账号</p>
         <input
           placeholder="用户名"
           value={username}
@@ -59,6 +64,7 @@ export default function Login() {
           没有账号?去注册
         </button>
       </form>
+      </div>
     </div>
   )
 }

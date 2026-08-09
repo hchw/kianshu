@@ -640,19 +640,26 @@ func TestSystemPromptContainsRoleAndPrinciples(t *testing.T) {
 
 func TestSystemPromptCacheSetShape(t *testing.T) {
 	p := systemPrompt(ModeEdit)
-	// cache-set 的正确配置形状必须在提示中显式呈现(writes 键值映射)
+	// cache-set 的正确配置形状必须在提示中显式呈现(writes 键值映射,body.xxx 信封路径)
 	if !strings.Contains(p, `"writes"`) {
 		t.Fatalf("system prompt should teach cache-set config.writes shape")
 	}
-	if !strings.Contains(p, `{"writes": {"token": "token"}}`) {
-		t.Fatalf("system prompt should include concrete writes example")
+	if !strings.Contains(p, `"body.token"`) {
+		t.Fatalf("system prompt should include writes example with body.token expression")
+	}
+	// 新特性：static 固定值 + $static.xxx 引用
+	if !strings.Contains(p, `$static`) {
+		t.Fatalf("system prompt should mention $static for literal string values")
+	}
+	if !strings.Contains(p, `"static"`) {
+		t.Fatalf("system prompt should mention static config field")
 	}
 }
 
 func TestSystemPromptAuthChainTemplate(t *testing.T) {
 	p := systemPrompt(ModeGenerate)
-	// 认证链模板:登录节点 + 缓存节点(writes 形状) + 受保护节点($cache.token)
-	for _, frag := range []string{"认证链", `"type":"cache-set"`, `"writes":{"token":"token"}`, `"$cache.token"`, `"parent":"n_cache_token"`} {
+	// 认证链模板:登录节点 + 缓存节点(writes 形状,body.xxx 信封路径) + 受保护节点($cache.token)
+	for _, frag := range []string{"认证链", `"type":"cache-set"`, `"writes":{"token":"body.token"}`, `"$cache.token"`, `"parent":"n_cache_token"`} {
 		if !strings.Contains(p, frag) {
 			t.Fatalf("generate prompt should contain auth-chain template fragment %q", frag)
 		}

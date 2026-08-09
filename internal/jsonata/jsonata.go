@@ -34,6 +34,22 @@ func Eval(expr string, data any) (any, error) {
 	return e.Eval(data)
 }
 
+// EvalWithVars evaluates a JSONata expression against the given input data,
+// with custom variables (e.g. $static) available in the expression.
+func EvalWithVars(expr string, data any, vars map[string]interface{}) (any, error) {
+	e, err := jsonata.Compile(expr)
+	if err != nil {
+		return nil, err
+	}
+	if vars != nil {
+		if err := e.RegisterVars(vars); err != nil {
+			return nil, fmt.Errorf("注册变量失败: %w", err)
+		}
+	}
+	registerExts(e)
+	return e.Eval(data)
+}
+
 // Exts returns the encryption-suite extension functions, shared by all
 // expression evaluations. Names are registered without the leading '$'.
 func Exts() map[string]jsonata.Extension {

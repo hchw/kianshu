@@ -87,7 +87,52 @@ func unmarshalSessionMessages(s *model.FlowSession) ([]openai.Message, error) {
 	if err := json.Unmarshal([]byte(s.Messages), &msgs); err != nil {
 		return nil, fmt.Errorf("解析会话消息失败: %w", err)
 	}
-	return msgs, nil
+	return fixMessageHistory(msgs), nil
+}
+
+// fixMessageHistory detects and fixes trailing incomplete assistant(tool_calls)
+// messages that lack matching tool responses. This can happen when a scope-
+// violation pause saved the session mid-round (before this was fixed).
+func fixMessageHistory(msgs []openai.Message) []openai.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	// 找到最后一条 assistant(tool_calls) 消息，检查其后的 tool 消息是否完整
+	lastAssistantIdx := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" && len(msgs[i].ToolCalls) > 0 {
+			lastAssistantIdx = i
+			break
+		}
+	}
+	if lastAssistantIdx < 0 {
+		return msgs
+	}
+	// 收集 assistant 中的 tool_call_id 集合
+	expected := map[string]bool{}
+	for _, tc := range msgs[lastAssistantIdx].ToolCalls {
+		expected[tc.ID] = true
+	}
+	// 从 assistant 之后收集 tool 消息的 tool_call_id
+	seen := map[string]bool{}
+	for i := lastAssistantIdx + 1; i < len(msgs); i++ {
+		if msgs[i].Role == "tool" {
+			seen[msgs[i].ToolCallID] = true
+		}
+	}
+	// 检查是否每个 tool_call_id 都有对应的 tool 消息
+	complete := true
+	for id := range expected {
+		if !seen[id] {
+			complete = false
+			break
+		}
+	}
+	if complete {
+		return msgs
+	}
+	// 截断到最后一条完整的 assistant 消息之前
+	return msgs[:lastAssistantIdx]
 }
 
 // CompressSession compacts a flow's dialog history by keeping the system
