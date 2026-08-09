@@ -341,6 +341,17 @@ h3 {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  position: relative;
+}
+
+.page:not(.full)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: url('/main.png') center/cover no-repeat;
+  opacity: 0.1;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .container {
@@ -503,10 +514,45 @@ h3 {
 .auth-page {
   height: 100%;
   display: flex;
+  background: var(--bg);
+}
+
+.auth-brand {
+  flex: 4;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--space-4);
-  background: var(--bg);
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background: linear-gradient(135deg, var(--primary-bg), var(--bg));
+  border-right: 1px solid var(--border);
+}
+
+.auth-brand img {
+  max-width: 65%;
+  max-height: 50vh;
+  height: auto;
+  width: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 24px rgba(15, 23, 42, 0.12));
+}
+
+.auth-brand h2 {
+  font-size: var(--fs-20);
+  color: var(--muted);
+  font-weight: 400;
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+
+.auth-form {
+  flex: 1;
+  min-width: 340px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
 }
 
 .auth-card {
@@ -524,6 +570,30 @@ h3 {
 
 .auth-card input {
   width: 100%;
+}
+
+@media (max-width: 640px) {
+  .auth-page {
+    flex-direction: column;
+  }
+  .auth-brand {
+    flex: none;
+    padding: var(--space-5) var(--space-4) var(--space-2);
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .auth-brand img {
+    max-width: 50%;
+    max-height: 25vh;
+  }
+  .auth-brand h2 {
+    font-size: var(--fs-16);
+  }
+  .auth-form {
+    flex: 1;
+    padding: var(--space-3);
+    align-items: flex-start;
+  }
 }
 
 /* ============================================================
@@ -1366,4 +1436,119 @@ h3 {
 .pagination button {
   padding: 4px 12px;
   font-size: var(--fs-12);
+}
+
+/* ============================================================
+   下拉菜单
+   ============================================================ */
+
+.dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+.dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: var(--radius-6);
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  white-space: nowrap;
+  transition: background-color var(--t-fast);
+}
+
+.dropdown-trigger:hover {
+  background: var(--hover);
+}
+
+.dropdown-trigger .chevron {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--t-fast);
+  color: var(--muted);
+}
+
+.dropdown.open .dropdown-trigger .chevron {
+  transform: rotate(180deg);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-1);
+  z-index: 30;
+  display: none;
+  animation: dropdown-in 120ms ease;
+}
+
+.dropdown-menu.right {
+  left: auto;
+  right: 0;
+}
+
+.dropdown.open .dropdown-menu {
+  display: block;
+}
+
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 12px;
+  border-radius: var(--radius-6);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-13);
+  transition: background-color var(--t-fast);
+}
+
+.dropdown-item:hover {
+  background: var(--hover);
+}
+
+.dropdown-item .item-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: var(--space-1) 0;
+}
+
+/* 顶栏品牌 logo */
+.topbar-logo {
+  height: 24px;
+  width: auto;
+  vertical-align: middle;
+  margin-right: 2px;
 }

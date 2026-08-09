@@ -42,6 +42,14 @@ type APICall struct {
 	Body    any
 }
 
+// APIResponse is the structured result of an HTTP call: the status code and
+// the parsed (or raw) response body. CallAPI implementations return this;
+// apiOutput wraps it into the node's output envelope.
+type APIResponse struct {
+	StatusCode int
+	Body       any
+}
+
 // NodeResult records the outcome of a single node execution.
 type NodeResult struct {
 	NodeID     string    `json:"node_id"`
@@ -63,7 +71,7 @@ type Options struct {
 	Host string
 	// CallAPI performs an outbound HTTP call for an api node. When nil, api
 	// nodes fail with an explanatory error (pure model execution).
-	CallAPI func(APICall) (any, error)
+	CallAPI func(APICall) (*APIResponse, error)
 	// Timeout bounds a single HTTP call. Zero means no explicit timeout.
 	Timeout time.Duration
 }
@@ -287,6 +295,11 @@ func evalParamValue(v any, input map[string]any) (any, error) {
 // string. Explicit params override upstream values with the same key, and
 // `=`-prefixed param strings are evaluated as JSONata expressions against the
 // current input (mirroring start params).
+//
+// 无论 HTTP 状态码如何,只要网络请求成功(无连接/超时错误),api 节点都返回
+// StatusOK。返回值统一为信封结构: {"status_code": <float64>, "body": <解析后的
+// JSON 或原始字符串>}。下游断言节点可通过 field="status_code" 或
+// field="body.xxx" 来校验状态码与响应体。
 func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 	in := asInputMap(input)
 	if e.opts.CallAPI == nil {
@@ -370,7 +383,11 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return resp, nil
+	// 统一信封格式:下游断言节点通过 status_code / body.xxx 访问。
+	return map[string]any{
+		"status_code": float64(resp.StatusCode),
+		"body":        resp.Body,
+	}, nil
 }
 
 // pathParamRe matches a `{name}` placeholder in a URL path.
@@ -418,6 +435,8 @@ func (e *engine) adapterOutput(n *flow.Node, input any) (any, error) {
 }
 
 // Assertion is one check performed by an assert node.
+// Field 支持点分隔路径,如 "status_code"(API 返回的信封状态码)、
+// "body.token"(响应体中嵌套字段)、"body.0.name"(数组元素)。
 type Assertion struct {
 	Field    string `json:"field"`
 	Operator string `json:"op"`
@@ -504,15 +523,32 @@ func getByPath(v any, path string) (any, bool) {
 // current input, stores the values in the run-scoped cache, and returns a
 // snapshot copy of the cache so that later cache writes do not retroactively
 // mutate this node's recorded output.
+//
+// Write value rules:
+//   - string → JSONata expression evaluated against input, with $static
+//     bound to the config.static map (if provided)
+//   - non-string (number, bool, array, object) → literal value, stored as-is
+//
+// Use config.static for string literals: write $static.key in the expression
+// and put the literal value under the same key in the static map.
 func (e *engine) cacheSetOutput(n *flow.Node, input any) (any, error) {
 	var cfg struct {
-		Writes map[string]string `json:"writes"`
+		Writes map[string]any            `json:"writes"`
+		Static map[string]interface{}    `json:"static,omitempty"`
 	}
 	if err := flow.UnmarshalConfig(n, &cfg); err != nil {
 		return nil, err
 	}
-	for k, expr := range cfg.Writes {
-		v, err := jsonata.Eval(expr, input)
+	for k, raw := range cfg.Writes {
+		expr, ok := raw.(string)
+		if !ok {
+			// 非 string 直接当字面量写入
+			e.cache[k] = raw
+			continue
+		}
+		// string → JSONata 表达式，注入 $static
+		vars := map[string]interface{}{"static": cfg.Static}
+		v, err := jsonata.EvalWithVars(expr, input, vars)
 		if err != nil {
 			return nil, fmt.Errorf("cache-set 写入 %s 求值失败: %w", k, err)
 		}

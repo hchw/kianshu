@@ -39,6 +39,11 @@ export default function Register() {
 
   return (
     <div className="auth-page">
+      <div className="auth-brand">
+        <img src="/kianshu.png" alt="鉴枢" />
+        <h2>集成测试流编辑器</h2>
+      </div>
+      <div className="auth-form">
       <form className="card auth-card" onSubmit={submit}>
         <h1>注册</h1>
         <input
@@ -69,6 +74,7 @@ export default function Register() {
           已有账号?去登录
         </button>
       </form>
+      </div>
     </div>
   )
 }

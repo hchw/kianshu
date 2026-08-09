@@ -26,12 +26,14 @@ var ErrRunNotFound = errors.New("执行日志不存在")
 // HTTPCallAPI returns the real outbound CallAPI implementation. When a test
 // host is empty, api nodes fail with an explanatory error. A positive timeout
 // bounds each HTTP call so a hung upstream cannot stall a run forever.
-func HTTPCallAPI(host string, timeout time.Duration) func(exec.APICall) (any, error) {
+// 无论 HTTP 状态码如何,只要网络请求成功(无连接/超时错误)都返回响应;
+// 错误码/响应体的判断由下游断言节点负责。
+func HTTPCallAPI(host string, timeout time.Duration) func(exec.APICall) (*exec.APIResponse, error) {
 	client := &http.Client{}
 	if timeout > 0 {
 		client.Timeout = timeout
 	}
-	return func(call exec.APICall) (any, error) {
+	return func(call exec.APICall) (*exec.APIResponse, error) {
 		u, err := url.Parse(call.URL)
 		if err != nil {
 			return nil, err
@@ -78,14 +80,11 @@ func HTTPCallAPI(host string, timeout time.Duration) func(exec.APICall) (any, er
 			return nil, err
 		}
 		log.Printf("[resp] %d %s", resp.StatusCode, strings.TrimSpace(string(data)))
-		if resp.StatusCode >= 400 {
-			return nil, fmt.Errorf("请求失败: HTTP %d %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		var respBody any
+		if err := json.Unmarshal(data, &respBody); err != nil {
+			respBody = string(data)
 		}
-		var v any
-		if err := json.Unmarshal(data, &v); err != nil {
-			return map[string]any{"body": string(data)}, nil
-		}
-		return v, nil
+		return &exec.APIResponse{StatusCode: resp.StatusCode, Body: respBody}, nil
 	}
 }
 

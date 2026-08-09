@@ -150,3 +150,14 @@ type pauseAnswerReq struct {
 	QuestionID string `json:"question_id" validate:"required" example:"q1"`
 	Answer     string `json:"answer" validate:"required" minLength:"1" example:"确认使用版本 v2"`
 }
+
+// memberListResp is the response for listing members.
+type memberListResp struct {
+	Owner   memberView   `json:"owner"`
+	Members []memberView `json:"members"`
+}
+
+// userSearchResp is the response for searching users.
+type userSearchResp struct {
+	Users []userBrief `json:"users"`
+}

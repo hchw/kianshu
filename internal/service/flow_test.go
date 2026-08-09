@@ -444,12 +444,16 @@ func TestHTTPCallAPIBuildsRequest(t *testing.T) {
 	if gotBody["account"] != "a" {
 		t.Fatalf("body mismatch: %v", gotBody)
 	}
-	if m, ok := out.(map[string]any); !ok || m["token"] != "abc" {
-		t.Fatalf("output mismatch: %v", out)
+	if out.StatusCode != 200 {
+		t.Fatalf("status_code = %v, want 200", out.StatusCode)
+	}
+	body, _ := out.Body.(map[string]any)
+	if body == nil || body["token"] != "abc" {
+		t.Fatalf("body.token mismatch: %v", out)
 	}
 }
 
-func TestHTTPCallAPIErrorOn4xx(t *testing.T) {
+func TestHTTPCallAPIPassesThrough4xx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`unauthorized`))
@@ -457,8 +461,15 @@ func TestHTTPCallAPIErrorOn4xx(t *testing.T) {
 	defer srv.Close()
 
 	callAPI := HTTPCallAPI(srv.URL, 5*time.Second)
-	if _, err := callAPI(exec.APICall{Method: "GET", URL: srv.URL + "/x"}); err == nil {
-		t.Fatal("expected error for 4xx response")
+	out, err := callAPI(exec.APICall{Method: "GET", URL: srv.URL + "/x"})
+	if err != nil {
+		t.Fatalf("4xx 不应导致错误,错误码判断由断言节点负责: %v", err)
+	}
+	if out.StatusCode != 401 {
+		t.Fatalf("status_code = %v, want 401", out.StatusCode)
+	}
+	if out.Body != "unauthorized" {
+		t.Fatalf("body = %v, want unauthorized", out.Body)
 	}
 }
 

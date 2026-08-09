@@ -110,7 +110,7 @@ func (t *Tree) String() string {
 func (t *Tree) ValidateTreeShape() []ValidationError {
 	// Reconcile the two link encodings: parent pointers are authoritative and
 	// children lists are derived from them, so clients may submit either.
-	t.reconcileChildren()
+	t.ReconcileChildren()
 
 	var errs []ValidationError
 	if t.Nodes == nil {
@@ -212,10 +212,11 @@ func NewNode(id string, typ NodeType) *Node {
 	return &Node{ID: id, Type: typ, Inputs: map[string]IOKey{}, Outputs: map[string]IOKey{}}
 }
 
-// reconcileChildren rebuilds every node's children list from parent pointers,
+// ReconcileChildren rebuilds every node's children list from parent pointers,
 // making the parent encoding authoritative regardless of which form a client
-// submitted.
-func (t *Tree) reconcileChildren() {
+// submitted. Call this after any mutation that changes parent pointers to
+// ensure the tree is fully consistent before serialisation.
+func (t *Tree) ReconcileChildren() {
 	for _, n := range t.Nodes {
 		if n != nil {
 			n.Children = nil

@@ -80,9 +80,13 @@ func (s *tryScope) execCatch(e *engine, id string, n *flow.Node, parentOut any) 
 		s.pendingFailure = false
 		return
 	}
-	// Pass-through: re-run the catch node normally so its result records the
-	// same value the preceding output carried.
-	st := e.runNode(id, parentOut)
+	// Pass-through: 将前一个分支的输出传给 catch,使 catch 的子节点能
+	// 拿到被保护节点的产出(而非 try 的输入),保证数据链不断。
+	prevOut := s.output
+	if prevOut == nil {
+		prevOut = parentOut
+	}
+	st := e.runNode(id, prevOut)
 	if st == StatusOK {
 		if r, ok := e.results[id]; ok {
 			s.output = r.Output

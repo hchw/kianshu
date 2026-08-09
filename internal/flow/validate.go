@@ -69,7 +69,7 @@ type cacheWrites map[string][]string
 // cacheSetWrites returns the keys a cache-set node writes.
 func cacheSetWrites(n *Node) []string {
 	var cfg struct {
-		Writes map[string]string `json:"writes"`
+		Writes map[string]any `json:"writes"`
 	}
 	_ = UnmarshalConfig(n, &cfg)
 	var keys []string
@@ -100,6 +100,16 @@ func (t *Tree) validateIOContracts() []ValidationError {
 			}
 			for k, v := range an.Outputs {
 				provided[k] = v
+			}
+			// API 节点运行时输出信封 {status_code, body},下游引用响应字段
+			// 需通过 body.xxx 路径,而非裸字段名。验证层补充这两个隐式键。
+			if an.Type == NodeAPI {
+				if _, exists := provided["status_code"]; !exists {
+					provided["status_code"] = IOKey{Type: IOTypePrimitive}
+				}
+				if _, exists := provided["body"]; !exists {
+					provided["body"] = IOKey{Type: IOTypeObject}
+				}
 			}
 			if an.Type == NodeCacheSet {
 				for _, k := range cacheSetWrites(an) {

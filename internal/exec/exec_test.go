@@ -270,10 +270,10 @@ func TestCatchRunsOnceOnFallback(t *testing.T) {
 	res, _ := Run(context.Background(), tree, Options{
 		Host:        "https://api.example.com",
 		StartParams: map[string]any{"ok": "sibling"},
-		CallAPI: func(c APICall) (any, error) {
+		CallAPI: func(c APICall) (*APIResponse, error) {
 			apiCalls++
 			if strings.HasSuffix(c.URL, "/ok") {
-				return map[string]any{"ok": true}, nil
+				return &APIResponse{StatusCode: 200, Body: map[string]any{"ok": true}}, nil
 			}
 			return nil, fmt.Errorf("http error")
 		},
@@ -308,7 +308,7 @@ func TestCacheWriteAndRead(t *testing.T) {
 	nodeCfg(t, tree.Nodes["n2"], map[string]any{
 		"unit": map[string]any{"method": "POST", "path": "/login"},
 	})
-	nodeCfg(t, tree.Nodes["n3"], map[string]any{"writes": map[string]any{"token": "$.resp.token"}})
+	nodeCfg(t, tree.Nodes["n3"], map[string]any{"writes": map[string]any{"token": "body.resp.token"}})
 	nodeCfg(t, tree.Nodes["n4"], map[string]any{"expr": `$.token`})
 	tree.Nodes["n4"].Inputs = map[string]flow.IOKey{"token": {Type: flow.IOTypePrimitive, Source: "$cache.token"}}
 	tree.AddChild("n1", "n2")
@@ -317,8 +317,8 @@ func TestCacheWriteAndRead(t *testing.T) {
 
 	res, _ := Run(context.Background(), tree, Options{
 		Host: "https://api.example.com",
-		CallAPI: func(c APICall) (any, error) {
-			return map[string]any{"resp": map[string]any{"token": "abc123"}}, nil
+		CallAPI: func(c APICall) (*APIResponse, error) {
+			return &APIResponse{StatusCode: 200, Body: map[string]any{"resp": map[string]any{"token": "abc123"}}}, nil
 		},
 	})
 	if res.Status != StatusOK {
@@ -395,9 +395,9 @@ func TestAPINodeUsesHostAndSnapshot(t *testing.T) {
 			"account":       "alice",
 			"authorization": "Bearer t",
 		},
-		CallAPI: func(c APICall) (any, error) {
+		CallAPI: func(c APICall) (*APIResponse, error) {
 			got = c
-			return map[string]any{"ok": true}, nil
+			return &APIResponse{StatusCode: 200, Body: map[string]any{"ok": true}}, nil
 		},
 	})
 	if res.Status != StatusOK {
@@ -442,9 +442,9 @@ func TestAPINodeParamsAndPathSubstitution(t *testing.T) {
 	res, _ := Run(context.Background(), tree, Options{
 		Host:        "https://api.example.com",
 		StartParams: map[string]any{"id": "from-start", "scope": "from-upstream", "unused": "x"},
-		CallAPI: func(c APICall) (any, error) {
+		CallAPI: func(c APICall) (*APIResponse, error) {
 			got = c
-			return map[string]any{"ok": true}, nil
+			return &APIResponse{StatusCode: 200, Body: map[string]any{"ok": true}}, nil
 		},
 	})
 	if res.Status != StatusOK {
@@ -482,6 +482,76 @@ func TestCacheSetOutputsFullCache(t *testing.T) {
 	out, _ := json.Marshal(res.Results["n2"].Output)
 	if string(out) != `{"a":"x","b":"y"}` {
 		t.Fatalf("cache-set output = %s", out)
+	}
+}
+
+func TestCacheSetLiteralValues(t *testing.T) {
+	tree := treeOf(map[string]*flow.Node{
+		"n1": flow.NewNode("n1", flow.NodeStart),
+		"n2": flow.NewNode("n2", flow.NodeCacheSet),
+	})
+	// 非 string 类型直接当字面量写入
+	nodeCfg(t, tree.Nodes["n2"], map[string]any{
+		"writes": map[string]any{
+			"count":  float64(3),
+			"flag":   true,
+			"items":  []any{"a", "b"},
+		},
+	})
+	tree.AddChild("n1", "n2")
+
+	res, _ := Run(context.Background(), tree, Options{StartParams: map[string]any{}})
+
+	// 数字
+	if res.Cache["count"] != float64(3) {
+		t.Fatalf("cache[count] = %v, want 3", res.Cache["count"])
+	}
+	// 布尔
+	if res.Cache["flag"] != true {
+		t.Fatalf("cache[flag] = %v, want true", res.Cache["flag"])
+	}
+	// 数组
+	items, ok := res.Cache["items"].([]any)
+	if !ok || len(items) != 2 || items[0] != "a" {
+		t.Fatalf("cache[items] = %v, want [a b]", res.Cache["items"])
+	}
+}
+
+func TestCacheSetStaticVars(t *testing.T) {
+	tree := treeOf(map[string]*flow.Node{
+		"n1": flow.NewNode("n1", flow.NodeStart),
+		"n2": flow.NewNode("n2", flow.NodeCacheSet),
+	})
+	// $static.invalid 引用 static 里的固定字符串
+	// StartParams 模拟 api 的信封输出 {body: {token: "abc123"}}
+	nodeCfg(t, tree.Nodes["n2"], map[string]any{
+		"writes": map[string]any{
+			"token":        "body.token",
+			"invalid_auth": "$static.invalid",
+		},
+		"static": map[string]interface{}{
+			"invalid": "fake_invalid_token_12345",
+		},
+	})
+	tree.AddChild("n1", "n2")
+
+	res, err := Run(context.Background(), tree, Options{
+		StartParams: map[string]any{"body": map[string]any{"token": "abc123"}},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != StatusOK {
+		for id, r := range res.Results {
+			t.Logf("node %s: status=%s err=%v", id, r.Status, r.Error)
+		}
+		t.Fatalf("status = %s", res.Status)
+	}
+	if res.Cache["token"] != "abc123" {
+		t.Fatalf("cache[token] = %v, want abc123", res.Cache["token"])
+	}
+	if res.Cache["invalid_auth"] != "fake_invalid_token_12345" {
+		t.Fatalf("cache[invalid_auth] = %v, want fake_invalid_token_12345", res.Cache["invalid_auth"])
 	}
 }
 
@@ -601,9 +671,9 @@ func TestAPIAuthHeaderFromSecurityScheme(t *testing.T) {
 			res, err := Run(context.Background(), tree, Options{
 				Host:        "http://x",
 				StartParams: map[string]any{c.key: c.value},
-				CallAPI: func(call APICall) (any, error) {
+				CallAPI: func(call APICall) (*APIResponse, error) {
 					got = call
-					return map[string]any{}, nil
+					return &APIResponse{StatusCode: 200, Body: map[string]any{}}, nil
 				},
 			})
 			if err != nil {
@@ -631,7 +701,7 @@ func TestAPICacheChainAncestorLayout(t *testing.T) {
 		"n3": flow.NewNode("n3", flow.NodeAPI),
 	})
 	nodeCfg(t, tree.Nodes["n2"], map[string]any{"unit": map[string]any{"method": "POST", "path": "/login"}})
-	nodeCfg(t, tree.Nodes["cs"], map[string]any{"writes": map[string]string{"token": "token"}})
+	nodeCfg(t, tree.Nodes["cs"], map[string]any{"writes": map[string]string{"token": "body.token"}})
 	nodeCfg(t, tree.Nodes["n3"], map[string]any{"unit": map[string]any{
 		"method": "GET", "path": "/test-sets", "security": `[{"BearerAuth":[]}]`,
 	}})
@@ -648,13 +718,13 @@ func TestAPICacheChainAncestorLayout(t *testing.T) {
 	res, err := Run(context.Background(), tree, Options{
 		Host:        "http://x",
 		StartParams: map[string]any{"username": "u", "password": "p"},
-		CallAPI: func(c APICall) (any, error) {
+		CallAPI: func(c APICall) (*APIResponse, error) {
 			calls++
 			if calls == 1 {
-				return map[string]any{"token": "abc123"}, nil
+				return &APIResponse{StatusCode: 200, Body: map[string]any{"token": "abc123"}}, nil
 			}
 			readerCall = c
-			return map[string]any{}, nil
+			return &APIResponse{StatusCode: 200, Body: map[string]any{}}, nil
 		},
 	})
 	if err != nil {
@@ -699,11 +769,11 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	// n_seed -> n_login, n_try_register
 	tree.AddChild("n_seed", "n_login")
 	tree.AddChild("n_seed", "n_try_register")
-	// n_login -> n_cache_token
+	// n_login -> n_cache_token, n_assert_login
 	tree.AddChild("n_login", "n_cache_token")
-	// n_cache_token -> n_token_valid, n_assert_login
+	tree.AddChild("n_login", "n_assert_login")
+	// n_cache_token -> n_token_valid
 	tree.AddChild("n_cache_token", "n_token_valid")
-	tree.AddChild("n_cache_token", "n_assert_login")
 	// n_token_valid -> n_assert_token_valid, n_logout
 	tree.AddChild("n_token_valid", "n_assert_token_valid")
 	tree.AddChild("n_token_valid", "n_logout")
@@ -726,9 +796,9 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 		},
 	})
 
-	// Config: n_cache_token writes token to cache
+	// Config: n_cache_token writes token to cache (envelope: body.token)
 	nodeCfg(t, tree.Nodes["n_cache_token"], map[string]any{
-		"writes": map[string]string{"token": "token"},
+		"writes": map[string]string{"token": "body.token"},
 	})
 
 	// Config: n_try_register (try node, no special config needed)
@@ -740,11 +810,31 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	})
 
 	// Config: n_assert_login
-	nodeCfg(t, tree.Nodes["n_assert_login"], map[string]any{"status": float64(200)})
-	nodeCfg(t, tree.Nodes["n_assert_logout"], map[string]any{"status": float64(200)})
-	nodeCfg(t, tree.Nodes["n_assert_token_valid"], map[string]any{"status": float64(200)})
-	nodeCfg(t, tree.Nodes["n_assert_token_invalid"], map[string]any{"status": float64(401)})
-	nodeCfg(t, tree.Nodes["n_assert_register"], map[string]any{})
+	nodeCfg(t, tree.Nodes["n_assert_login"], map[string]any{
+		"assertions": []any{
+			map[string]any{"field": "status_code", "op": "eq", "expected": float64(200)},
+		},
+	})
+	nodeCfg(t, tree.Nodes["n_assert_logout"], map[string]any{
+		"assertions": []any{
+			map[string]any{"field": "status_code", "op": "eq", "expected": float64(200)},
+		},
+	})
+	nodeCfg(t, tree.Nodes["n_assert_token_valid"], map[string]any{
+		"assertions": []any{
+			map[string]any{"field": "status_code", "op": "eq", "expected": float64(200)},
+		},
+	})
+	nodeCfg(t, tree.Nodes["n_assert_token_invalid"], map[string]any{
+		"assertions": []any{
+			map[string]any{"field": "status_code", "op": "eq", "expected": float64(401)},
+		},
+	})
+	nodeCfg(t, tree.Nodes["n_assert_register"], map[string]any{
+		"assertions": []any{
+			map[string]any{"field": "status_code", "op": "eq", "expected": float64(200)},
+		},
+	})
 
 	// Inputs for api nodes (mirroring the real flow)
 	tree.Nodes["n_login"].Inputs = map[string]flow.IOKey{
@@ -831,32 +921,32 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	}
 
 	// Mock API: login succeeds, token_valid succeeds, logout succeeds,
-	// token_invalid returns 401 (fails), register returns 400 (fails).
+	// token_invalid returns 401 (asserted OK), register returns 400 (assert fails→catch).
 	providerCallCount := 0
-	callAPI := func(call APICall) (any, error) {
+	callAPI := func(call APICall) (*APIResponse, error) {
 		path := call.URL
 		switch {
 		case containsStr(path, "/auth/login"):
 			record("n_login")
-			return map[string]any{
+			return &APIResponse{StatusCode: 200, Body: map[string]any{
 				"id":       float64(14),
 				"token":    "tok-deadbeef",
 				"username": "testuser2",
-			}, nil
+			}}, nil
 		case containsStr(path, "/providers"):
 			providerCallCount++
 			if providerCallCount == 1 {
 				record("n_token_valid")
-				return map[string]any{"providers": []any{}}, nil
+				return &APIResponse{StatusCode: 200, Body: map[string]any{"providers": []any{}}}, nil
 			}
 			record("n_token_invalid")
-			return nil, fmt.Errorf("HTTP 401: 未登录或会话已失效")
+			return &APIResponse{StatusCode: 401, Body: "未登录或会话已失效"}, nil
 		case containsStr(path, "/auth/logout"):
 			record("n_logout")
-			return map[string]any{"ok": true}, nil
+			return &APIResponse{StatusCode: 200, Body: map[string]any{"ok": true}}, nil
 		case containsStr(path, "/auth/register"):
 			record("n_register")
-			return nil, fmt.Errorf("HTTP 400: 用户名已存在")
+			return &APIResponse{StatusCode: 400, Body: "用户名已存在"}, nil
 		default:
 			return nil, fmt.Errorf("unexpected API call: %s", path)
 		}
@@ -907,14 +997,14 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	t.Log("n1 (start)")
 	t.Log(" └── n_seed (cache-set)")
 	t.Log("      ├── n_login (api)")
-	t.Log("      │    └── n_cache_token (cache-set)")
-	t.Log("      │         ├── n_token_valid (api)")
-	t.Log("      │         │    ├── n_assert_token_valid (assert)")
-	t.Log("      │         │    └── n_logout (api)")
-	t.Log("      │         │         ├── n_token_invalid (api)")
-	t.Log("      │         │         │    └── n_assert_token_invalid (assert)")
-	t.Log("      │         │         └── n_assert_logout (assert)")
-	t.Log("      │         └── n_assert_login (assert)")
+	t.Log("      │    ├── n_cache_token (cache-set)")
+	t.Log("      │    │    └── n_token_valid (api)")
+	t.Log("      │    │         ├── n_assert_token_valid (assert)")
+	t.Log("      │    │         └── n_logout (api)")
+	t.Log("      │    │              ├── n_token_invalid (api)")
+	t.Log("      │    │              │    └── n_assert_token_invalid (assert)")
+	t.Log("      │    │              └── n_assert_logout (assert)")
+	t.Log("      │    └── n_assert_login (assert)")
 	t.Log("      └── n_try_register (try)")
 	t.Log("           └── n_register (api)")
 	t.Log("                ├── n_assert_register (assert)")
@@ -935,17 +1025,19 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	// n_seed, n_login, n_cache_token should be "ok" (own execution succeeded)
 	// n_token_valid should be "ok" (own execution succeeded)
 	// n_logout should be "ok" (own execution succeeded)
-	// n_token_invalid should be "failed" (HTTP 401)
-	// n_assert_token_valid should be "ok"
-	// n_assert_logout should be "ok"
-	// n_assert_login should be "ok"
+	// n_token_invalid should be "ok" (API 返回 401,但不视为失败)
+	// n_assert_token_valid should be "ok" (断言 status_code==200 通过)
+	// n_assert_logout should be "ok" (断言 status_code==200 通过)
+	// n_assert_login should be "ok" (断言 status_code==200 通过)
+	// n_assert_token_invalid should be "ok" (断言 status_code==401 通过)
 	// n_try_register should NOT be "failed" (containment)
-	// n_register should be "failed" (HTTP 400)
-	// n_catch_register should be "ok" (consumed failure)
+	// n_register should be "ok" (API 返回 400,但不视为失败)
+	// n_assert_register should be "failed" (断言 status_code==200 失败)
+	// n_catch_register should be "ok" (consumed assertion failure)
 
 	okNodes := []string{"n_seed", "n_login", "n_cache_token", "n_token_valid",
 		"n_logout", "n_assert_token_valid", "n_assert_logout", "n_assert_login",
-		"n_catch_register"}
+		"n_assert_token_invalid", "n_token_invalid", "n_register", "n_catch_register"}
 	for _, id := range okNodes {
 		if r, ok := res.Results[id]; ok && r.Status != StatusOK {
 			t.Errorf("%s status = %s, want ok", id, r.Status)
@@ -954,8 +1046,8 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	if res.Results["n_try_register"].Status == StatusFailed {
 		t.Error("n_try_register should not be failed (try contains failure)")
 	}
-	if res.Results["n_register"].Status != StatusFailed {
-		t.Errorf("n_register status = %s, want failed", res.Results["n_register"].Status)
+	if res.Results["n_assert_register"].Status != StatusFailed {
+		t.Errorf("n_assert_register status = %s, want failed (断言 status_code==200 对 400 响应失败)", res.Results["n_assert_register"].Status)
 	}
 
 	_ = order
