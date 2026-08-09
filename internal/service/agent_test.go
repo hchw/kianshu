@@ -226,6 +226,20 @@ func TestRunAgentLimitReached(t *testing.T) {
 	if res.Rounds != MaxRounds {
 		t.Fatalf("expected %d rounds, got %d", MaxRounds, res.Rounds)
 	}
+
+	// 验证 session 状态为 paused 且包含 limit 类型的问题
+	sess, _ := GetFlowSession(gdb, flowID, 1)
+	if sess.Status != model.SessionPaused {
+		t.Fatalf("expected paused session after limit, got %s", sess.Status)
+	}
+	var questions []PauseQuestion
+	_ = json.Unmarshal([]byte(sess.PendingQuestions), &questions)
+	if len(questions) != 1 || questions[0].Type != "limit" {
+		t.Fatalf("expected 1 limit question, got %+v", questions)
+	}
+	if questions[0].ID != "limit-1" {
+		t.Fatalf("expected limit-1 id, got %q", questions[0].ID)
+	}
 }
 
 func TestRunAgentToolErrorRetry(t *testing.T) {
@@ -756,5 +770,268 @@ func TestGenerateAnalysisTreePersists(t *testing.T) {
 	}
 	if _, ok := tree.Nodes["n2"]; !ok {
 		t.Fatalf("analysis-phase node lost after generate: %s", d.Tree)
+	}
+}
+
+// TestAgentToolsScopePause 验证 scope 越界时返回暂停结果而非硬错误
+func TestAgentToolsScopePause(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+	d, _ := GetDraft(gdb, flowID)
+	tree, _ := flow.ParseTree(d.Tree)
+	tree.Nodes["n1"].Outputs = map[string]flow.IOKey{"token": {Type: flow.IOTypePrimitive}}
+	tree.Nodes["n2"] = flow.NewNode("n2", flow.NodeAdapter)
+	tree.AddChild("n1", "n2")
+
+	// scope 只包含 n1，不包含 n2
+	scope := map[string]bool{"n1": true}
+	ctx := &ToolContext{DB: gdb, TestSetID: 1, Tree: tree, Scope: scope}
+
+	// update_node 越界 → 应返回 pause
+	res := ExecTool(ctx, toolUpdateNode, json.RawMessage(`{"id":"n2","config":{"expr":"$"}}`))
+	if res.OK {
+		t.Fatalf("update outside scope should not be OK")
+	}
+	if !res.Paused {
+		t.Fatalf("update outside scope should pause, got error: %s", res.Error)
+	}
+	if len(res.Questions) != 1 || res.Questions[0].Type != "scope" {
+		t.Fatalf("expected 1 scope question, got %+v", res.Questions)
+	}
+	q := res.Questions[0]
+	if q.NodeID != "n2" {
+		t.Fatalf("expected node_id n2, got %s", q.NodeID)
+	}
+	if q.Operation != toolUpdateNode {
+		t.Fatalf("expected operation update_node, got %s", q.Operation)
+	}
+	if len(q.Options) != 3 {
+		t.Fatalf("expected 3 options (允许/拒绝/允许全部), got %v", q.Options)
+	}
+	if q.ToolArgs == "" {
+		t.Fatal("expected tool_args to be preserved for replay")
+	}
+
+	// delete_node 越界 → 应返回 pause
+	res = ExecTool(ctx, toolDeleteNode, json.RawMessage(`{"id":"n2"}`))
+	if !res.Paused || len(res.Questions) != 1 {
+		t.Fatalf("delete outside scope should pause, got %+v", res)
+	}
+	if res.Questions[0].Operation != toolDeleteNode {
+		t.Fatalf("expected delete_node operation, got %s", res.Questions[0].Operation)
+	}
+
+	// link_nodes 越界 → 应返回 pause（n2 是 child，不在 scope）
+	res = ExecTool(ctx, toolLinkNodes, json.RawMessage(`{"parent":"n1","child":"n2"}`))
+	if !res.Paused || len(res.Questions) != 1 {
+		t.Fatalf("link outside scope should pause, got %+v", res)
+	}
+}
+
+// TestRunAgentScopePauseAndResume 验证 RunAgent 中 scope 越界暂停→恢复的完整流程
+func TestRunAgentScopePauseAndResume(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+
+	// 预置树：n1(start) + n2(adapter)，scope 只勾选 n1
+	d, _ := GetDraft(gdb, flowID)
+	tree, _ := flow.ParseTree(d.Tree)
+	tree.Nodes["n1"].Outputs = map[string]flow.IOKey{"token": {Type: flow.IOTypePrimitive}}
+	tree.Nodes["n2"] = flow.NewNode("n2", flow.NodeAdapter)
+	tree.AddChild("n1", "n2")
+	d.Tree = tree.String()
+	if err := gdb.Save(d).Error; err != nil {
+		t.Fatalf("save draft: %v", err)
+	}
+
+	// Round 1: Agent 尝试 update_node n2 → 越界暂停
+	fake := &fakeProvider{
+		model: "m",
+		script: []scriptedRound{
+			{toolCalls: []openai.ToolCall{
+				tc(toolUpdateNode, `{"id":"n2","config":{"expr":"$"}}`),
+			}},
+		},
+	}
+	res, err := RunAgent(context.Background(), gdb, flowID, 1, AgentOptions{
+		Provider:      fake,
+		Instruction:   "修改 n2",
+		Mode:          ModeEdit,
+		SelectedNodes: []string{"n1"},
+	})
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if res.Finished {
+		t.Fatal("expected paused, got finished")
+	}
+	if !strings.Contains(res.Message, "已暂停") {
+		t.Fatalf("expected pause message, got %q", res.Message)
+	}
+
+	// 验证会话状态
+	sess, _ := GetFlowSession(gdb, flowID, 1)
+	if sess.Status != model.SessionPaused {
+		t.Fatalf("expected paused session, got %s", sess.Status)
+	}
+	var questions []PauseQuestion
+	_ = json.Unmarshal([]byte(sess.PendingQuestions), &questions)
+	if len(questions) != 1 || questions[0].Type != "scope" {
+		t.Fatalf("expected 1 scope question, got %+v", questions)
+	}
+	if questions[0].ToolCallID == "" {
+		t.Fatal("expected ToolCallID to be populated")
+	}
+
+	// 恢复：用户回答"允许"
+	fake2 := &fakeProvider{
+		model: "m",
+		script: []scriptedRound{
+			{content: strPtrS("已修改完成")},
+		},
+	}
+	res2, err := ResumeGeneration(context.Background(), gdb, flowID, 1,
+		[]PauseAnswer{{QuestionID: questions[0].ID, Answer: "允许"}}, fake2)
+	if err != nil {
+		t.Fatalf("ResumeGeneration: %v", err)
+	}
+	if !res2.Finished {
+		t.Fatalf("expected finished after resume, got %+v", res2)
+	}
+
+	// 验证 n2 的 config 已被重放修改
+	d2, _ := GetDraft(gdb, flowID)
+	tree2, _ := flow.ParseTree(d2.Tree)
+	if tree2.Nodes["n2"] == nil {
+		t.Fatal("n2 should still exist after resume")
+	}
+}
+
+// TestRunAgentModeGenerateIgnoresScope 验证生成模式下 scope 强制为空
+func TestRunAgentModeGenerateIgnoresScope(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+
+	fake := &fakeProvider{
+		model: "m",
+		script: []scriptedRound{
+			{content: strPtrS("完成")},
+		},
+	}
+	// 即使传入了 SelectedNodes，生成模式下也不应有任何 scope 限制
+	res, err := RunAgent(context.Background(), gdb, flowID, 1, AgentOptions{
+		Provider:      fake,
+		Instruction:   "生成流程",
+		Mode:          ModeGenerate,
+		SelectedNodes: []string{"n1"},
+	})
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if !res.Finished {
+		t.Fatalf("expected finished, got %+v", res)
+	}
+	// 不应有任何 tool event（因为 LLM 直接返回了 content 无 tool calls）
+	// 重点：不应触发 scope 越界暂停
+}
+
+// TestRunAgentLimitPauseAndResume 验证 50 轮上限暂停→恢复的完整流程
+func TestRunAgentLimitPauseAndResume(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+
+	// 48 轮工具调用 + 第 49 轮 content 完成 = 刚好不触发上限
+	script := make([]scriptedRound, MaxRounds)
+	for i := range script {
+		script[i] = scriptedRound{toolCalls: []openai.ToolCall{
+			tc(toolCreateNode, fmt.Sprintf(`{"id":"n%d","type":"adapter","parent":"n1"}`, i+2)),
+		}}
+	}
+	fake := &fakeProvider{model: "m", script: script}
+
+	// 第一次运行：达到 50 轮上限 → 暂停
+	res, err := RunAgent(context.Background(), gdb, flowID, 1, AgentOptions{
+		Provider:    fake,
+		Instruction: "建很多节点",
+		Mode:        ModeEdit,
+	})
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if !res.LimitReached {
+		t.Fatal("expected limit reached")
+	}
+	if res.Finished {
+		t.Fatal("expected not finished")
+	}
+
+	// 验证暂停问题
+	sess, _ := GetFlowSession(gdb, flowID, 1)
+	var questions []PauseQuestion
+	_ = json.Unmarshal([]byte(sess.PendingQuestions), &questions)
+	if len(questions) != 1 || questions[0].Type != "limit" {
+		t.Fatalf("expected limit question, got %+v", questions)
+	}
+
+	// 恢复：用户回答"继续生成"
+	fake2 := &fakeProvider{
+		model: "m",
+		script: []scriptedRound{
+			{content: strPtrS("生成完毕")},
+		},
+	}
+	res2, err := ResumeGeneration(context.Background(), gdb, flowID, 1,
+		[]PauseAnswer{{QuestionID: "limit-1", Answer: "继续生成"}}, fake2)
+	if err != nil {
+		t.Fatalf("ResumeGeneration: %v", err)
+	}
+	if !res2.Finished {
+		t.Fatalf("expected finished after resume, got %+v", res2)
+	}
+
+	// 验证 session 恢复正常
+	sess2, _ := GetFlowSession(gdb, flowID, 1)
+	if sess2.Status != model.SessionActive {
+		t.Fatalf("expected active session after resume, got %s", sess2.Status)
+	}
+}
+
+// TestRunAgentLimitPauseStop 验证用户选择"停止"时优雅退出
+func TestRunAgentLimitPauseStop(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+
+	script := make([]scriptedRound, MaxRounds)
+	for i := range script {
+		script[i] = scriptedRound{toolCalls: []openai.ToolCall{
+			tc(toolCreateNode, fmt.Sprintf(`{"id":"n%d","type":"adapter","parent":"n1"}`, i+2)),
+		}}
+	}
+	fake := &fakeProvider{model: "m", script: script}
+
+	RunAgent(context.Background(), gdb, flowID, 1, AgentOptions{
+		Provider:    fake,
+		Instruction: "建很多节点",
+		Mode:        ModeEdit,
+	})
+
+	// 用户选择"停止"
+	fake2 := &fakeProvider{model: "m"}
+	res, err := ResumeGeneration(context.Background(), gdb, flowID, 1,
+		[]PauseAnswer{{QuestionID: "limit-1", Answer: "停止"}}, fake2)
+	if err != nil {
+		t.Fatalf("ResumeGeneration: %v", err)
+	}
+	if !res.Finished {
+		t.Fatal("expected finished after stop")
+	}
+	if !strings.Contains(res.Message, "已停止") {
+		t.Fatalf("expected stop message, got %q", res.Message)
+	}
+
+	// session 应恢复为 active
+	sess, _ := GetFlowSession(gdb, flowID, 1)
+	if sess.Status != model.SessionActive {
+		t.Fatalf("expected active session after stop, got %s", sess.Status)
 	}
 }

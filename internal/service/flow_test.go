@@ -177,8 +177,9 @@ func TestSnapshotAPINodesWithDeriveInputs(t *testing.T) {
 	if v, ok := n2.Inputs["Authorization"]; !ok || v.Source != "$cache.token" {
 		t.Fatalf("Authorization input: %+v (want source=$cache.token)", v)
 	}
-	if v, ok := n2.Inputs["username"]; !ok || v.Source != "" {
-		t.Fatalf("username input: %+v (want empty source)", v)
+	// 无 source 的 input（如 query 参数 username）不再注入，避免校验假阳性。
+	if _, ok := n2.Inputs["username"]; ok {
+		t.Fatalf("username should NOT be injected (no source), got %+v", n2.Inputs["username"])
 	}
 
 	// Config snapshot still works
@@ -232,9 +233,9 @@ func TestSnapshotAPINodesInputsProtection(t *testing.T) {
 	if v, ok := n2.Inputs["Authorization"]; !ok || v.Source != "$cache.custom_token" {
 		t.Fatalf("Authorization source was overwritten: %+v", v)
 	}
-	// id should be appended from swagger
-	if _, ok := n2.Inputs["id"]; !ok {
-		t.Fatal("id should have been appended from swagger")
+	// 无 source 的 input（如 path 参数 id）不再注入。
+	if _, ok := n2.Inputs["id"]; ok {
+		t.Fatal("id should NOT be injected (no source)")
 	}
 }
 

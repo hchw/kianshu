@@ -214,7 +214,7 @@ func TestFlowValidationBlocked(t *testing.T) {
 	// Unresolved input key without a source should fail validation and block enabling.
 	tree := `{"start":"n1","nodes":{
 	  "n1":{"id":"n1","type":"start"},
-	  "n2":{"id":"n2","type":"api","parent":"n1","inputs":{"user_id":{"type":"primitive"}},"config":{"unit_id":0}}
+	  "n2":{"id":"n2","type":"api","parent":"n1","inputs":{"user_id":{"type":"primitive","source":"nonexistent"}},"config":{"unit_id":0}}
 	}}`
 	c.do("PUT", fmt.Sprintf("/api/flow/flows/%d/draft", flowID),
 		fmt.Sprintf(`{"name":"bad","tree":%s}`, mustJSON(t, tree)), http.StatusOK)

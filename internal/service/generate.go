@@ -17,10 +17,15 @@ import (
 
 // PauseQuestion is one user-decision point surfaced during generation.
 type PauseQuestion struct {
-	ID       string   `json:"id"`
-	Type     string   `json:"type"` // auth | sample | order | swagger
-	Question string   `json:"question"`
-	Options  []string `json:"options,omitempty"`
+	ID        string   `json:"id"`
+	Type      string   `json:"type"` // auth | sample | order | swagger | scope | limit
+	Question  string   `json:"question"`
+	Options   []string `json:"options,omitempty"`
+	NodeID     string `json:"node_id,omitempty"`
+	NodeType   string `json:"node_type,omitempty"`
+	Operation  string `json:"operation,omitempty"`
+	ToolArgs   string `json:"tool_args,omitempty"`   // JSON-encoded tool call args for replay
+	ToolCallID string `json:"tool_call_id,omitempty"` // LLM tool call id for tool-result correlation
 }
 
 // PauseAnswer pairs a user's answer with the question it addresses. Mapping by
@@ -190,6 +195,8 @@ func generateComplete(ctx context.Context, p ChatProvider, req openai.Completion
 // ResumeGeneration continues a paused generation with the user's answers. Each
 // answer carries the id of the question it addresses; pending questions without
 // an answer are listed as explicitly skipped so nothing is silently misapplied.
+// Scope-type pauses are handled by updating the node scope and replaying the
+// intercepted tool call before resuming the LLM loop.
 func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, answers []PauseAnswer, provider ChatProvider) (*AgentResult, error) {
 	session, err := GetFlowSession(db, flowID, userID)
 	if err != nil {
@@ -199,8 +206,6 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 	if err != nil {
 		return nil, err
 	}
-	req := newAgentCompletionRequest(provider.GetModel(), append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...))
-	req.Tools = toolSchemas()
 
 	answered := map[string]string{}
 	for _, a := range answers {
@@ -208,6 +213,30 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 	}
 	var pending []PauseQuestion
 	_ = json.Unmarshal([]byte(session.PendingQuestions), &pending)
+
+	// 检测 scope 越界暂停：不同于 generate 模式的 auth/sample 暂停，
+	// scope 暂停需要重放被拦截的工具调用而非向 LLM 注入回答消息。
+	hasScope := false
+	hasLimit := false
+	for _, q := range pending {
+		switch q.Type {
+		case "scope":
+			hasScope = true
+		case "limit":
+			hasLimit = true
+		}
+	}
+
+	if hasScope {
+		return resumeScopePause(ctx, db, flowID, session, history, pending, answered, provider)
+	}
+	if hasLimit {
+		return resumeLimitPause(ctx, db, flowID, session, history, pending, answered, provider)
+	}
+
+	// 原有的 generate 模式暂停恢复逻辑
+	req := newAgentCompletionRequest(provider.GetModel(), append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...))
+	req.Tools = toolSchemas()
 
 	var lines []string
 	var skipped []string
@@ -249,6 +278,132 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 		res.Message = fmt.Sprintf("已跳过未回答的问题:%s;%s", strings.Join(skipped, ", "), res.Message)
 	}
 	return res, nil
+}
+
+// resumeScopePause handles a scope-violation pause: process the user's allow/deny
+// answers, update the scope, replay the intercepted tool call, and resume the
+// LLM loop in edit mode.
+func resumeScopePause(ctx context.Context, db *gorm.DB, flowID uint, session *model.FlowSession, history []openai.Message, pending []PauseQuestion, answered map[string]string, provider ChatProvider) (*AgentResult, error) {
+	// 解析草稿树以构建 ToolContext
+	d, err := GetDraft(db, flowID)
+	if err != nil {
+		return nil, err
+	}
+	tree, err := flow.ParseTree(d.Tree)
+	if err != nil {
+		return nil, err
+	}
+	tsID := flowTestSetID(db, flowID)
+
+	// 从 session 恢复消息中的 scope 信息（通过节点 ID 重建原始 scope）
+	scope := map[string]bool{}
+	allowAll := false
+
+	for _, q := range pending {
+		ans, ok := answered[q.ID]
+		if !ok {
+			continue
+		}
+		switch ans {
+		case "允许本次全部越界节点":
+			allowAll = true
+		case "允许":
+			// 将越界节点加入 scope
+			for _, nid := range strings.Split(q.NodeID, ",") {
+				nid = strings.TrimSpace(nid)
+				if nid != "" {
+					scope[nid] = true
+				}
+			}
+		case "拒绝":
+			// 不加入 scope，稍后返回跳过结果
+		}
+	}
+
+	if allowAll {
+		scope = nil // nil 表示不限制
+	}
+
+	// 重放被拦截的工具调用
+	toolCtx := &ToolContext{DB: db, TestSetID: tsID, Tree: tree, Scope: scope}
+
+	// 扩展消息历史：在已有的 assistant(tool_calls) 之后追加 tool result
+	extended := make([]openai.Message, len(history))
+	copy(extended, history)
+
+	for _, q := range pending {
+		ans, ok := answered[q.ID]
+		if !ok || ans == "拒绝" {
+			// 未回答或拒绝：注入跳过结果
+			if q.Operation != "" && q.ToolArgs != "" {
+				skipResult := &ToolResult{OK: false, Error: fmt.Sprintf("用户拒绝修改节点 %s", q.NodeID)}
+				extended = append(extended, openai.Message{
+					Role:       "tool",
+					ToolCallID: q.ToolCallID,
+					Content:    strPtr(jsonString(skipResult)),
+				})
+			}
+			continue
+		}
+		// 允许：重放工具调用
+		if q.Operation != "" && q.ToolArgs != "" {
+			replayResult := ExecTool(toolCtx, q.Operation, json.RawMessage(q.ToolArgs))
+			extended = append(extended, openai.Message{
+				Role:       "tool",
+				ToolCallID: q.ToolCallID,
+				Content:    strPtr(jsonString(replayResult)),
+			})
+		}
+	}
+
+	// 保存会话
+	if b, err := json.Marshal(extended); err == nil {
+		session.Messages = string(b)
+	}
+	session.Status = model.SessionActive
+	session.PendingQuestions = ""
+	if err := SaveFlowSession(db, session); err != nil {
+		return nil, err
+	}
+
+	return RunAgent(ctx, db, flowID, 0, AgentOptions{
+		Provider:       provider,
+		Instruction:    "继续",
+		Mode:           ModeEdit,
+		PresetMessages: extended,
+		ResumeScope:    scope,
+	})
+}
+
+// resumeLimitPause handles a round-limit pause: on "继续生成" resume the LLM
+// loop with its full history; on "停止" mark the session active and stop.
+func resumeLimitPause(ctx context.Context, db *gorm.DB, flowID uint, session *model.FlowSession, history []openai.Message, pending []PauseQuestion, answered map[string]string, provider ChatProvider) (*AgentResult, error) {
+	ans, ok := answered["limit-1"]
+	if !ok || ans == "停止" {
+		session.Status = model.SessionActive
+		session.PendingQuestions = ""
+		if err := SaveFlowSession(db, session); err != nil {
+			return nil, err
+		}
+		return &AgentResult{Finished: true, Message: "已停止生成"}, nil
+	}
+
+	// 继续：以完整历史继续
+	if b, err := json.Marshal(history); err == nil {
+		session.Messages = string(b)
+	}
+	session.Status = model.SessionActive
+	session.PendingQuestions = ""
+	if err := SaveFlowSession(db, session); err != nil {
+		return nil, err
+	}
+
+	return RunAgent(ctx, db, flowID, 0, AgentOptions{
+		Provider:       provider,
+		Instruction:    "继续生成",
+		Mode:           ModeEdit,
+		PresetMessages: history,
+	})
 }
 
 // formatUnitBriefs renders unit summaries compactly for the generation prompt,

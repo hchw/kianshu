@@ -79,6 +79,9 @@ type AgentOptions struct {
 	// construction: the caller supplies the complete message list (history
 	// only, system excluded). Used by the generation workflow to resume.
 	PresetMessages []openai.Message
+	// ResumeScope, when non-nil, overrides the normal scope construction from
+	// SelectedNodes. Used by resume to inject a scope updated by user answers.
+	ResumeScope map[string]bool
 }
 
 // AgentResult is the outcome of an agent submission.
@@ -273,9 +276,17 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 	}
 	tsID := flowTestSetID(db, flowID)
 
-	scope := map[string]bool{}
-	for _, n := range opt.SelectedNodes {
-		scope[n] = true
+	var scope map[string]bool
+	if opt.ResumeScope != nil {
+		scope = opt.ResumeScope
+	} else {
+		scope = map[string]bool{}
+		// 防御性：generate 模式下强制 scope 为空，避免前端状态泄漏导致越界错误
+		if opt.Mode != ModeGenerate {
+			for _, n := range opt.SelectedNodes {
+				scope[n] = true
+			}
+		}
 	}
 
 	toolCtx := &ToolContext{DB: db, TestSetID: tsID, Tree: tree, Scope: scope}
@@ -361,7 +372,35 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 		for _, tc := range msg.ToolCalls {
 			log.Infof("agent: flow=%d round=%d tool=%s args=%s", flowID, round, tc.Function.Name, tc.Function.Arguments)
 			result := ExecTool(toolCtx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
-			log.Infof("agent: flow=%d round=%d tool=%s 结果 ok=%v err=%s", flowID, round, tc.Function.Name, result.OK, result.Error)
+			log.Infof("agent: flow=%d round=%d tool=%s 结果 ok=%v err=%s paused=%v", flowID, round, tc.Function.Name, result.OK, result.Error, result.Paused)
+
+			// scope 越界暂停：保存会话状态并返回，不将结果写入 LLM 消息
+			if result.Paused {
+				// 回填 tool_call_id，resumeScopePause 回复工具结果时需要
+				for i := range result.Questions {
+					result.Questions[i].ToolCallID = tc.ID
+				}
+				if b, err := json.Marshal(req.Messages[1:]); err == nil {
+					session.Messages = string(b)
+				}
+				session.Status = model.SessionPaused
+				if b, err := json.Marshal(result.Questions); err == nil {
+					session.PendingQuestions = string(b)
+				}
+				if err := SaveFlowSession(db, session); err != nil {
+					return nil, err
+				}
+				// 发出暂停事件
+				ev := Event{Kind: EventKindTool, Round: round, Tool: tc.Function.Name, Result: map[string]any{"paused": true, "questions": result.Questions}}
+				res.Events = append(res.Events, ev)
+				if opt.Emit != nil {
+					opt.Emit(ev)
+				}
+				res.Finished = false
+				res.Message = "已暂停,需要你确认节点修改范围"
+				return res, nil
+			}
+
 			ev := Event{Kind: EventKindTool, Round: round, Tool: tc.Function.Name, Args: tc.Function.Arguments, Result: result}
 			res.Events = append(res.Events, ev)
 			if opt.Emit != nil {
@@ -373,14 +412,39 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 				Content:    strPtr(jsonString(result)),
 			})
 		}
-	}
+		}
 
 	if !res.Finished {
 		if ctx.Err() != nil {
 			res.Message = "连接已断开,生成已终止"
 		} else {
+			// 50 轮上限暂停，而非硬停止：让用户决定是否继续
 			res.LimitReached = true
-			res.Message = "已达 50 轮工具调用上限,已停止。你可以继续提交微调。"
+			if b, err := json.Marshal(req.Messages[1:]); err == nil {
+				session.Messages = string(b)
+			}
+			questions := []PauseQuestion{{
+				ID:       "limit-1",
+				Type:     "limit",
+				Question: "已达 50 轮工具调用上限。是否继续生成？",
+				Options:  []string{"继续生成", "停止"},
+			}}
+			session.Status = model.SessionPaused
+			if b, err := json.Marshal(questions); err == nil {
+				session.PendingQuestions = string(b)
+			}
+			if err := SaveFlowSession(db, session); err != nil {
+				return nil, err
+			}
+			// 草稿仍然落地
+			if err := SnapshotAPINodes(db, tree); err != nil {
+				return nil, err
+			}
+			if _, err := UpdateDraft(db, flowID, d.Name, tree.String()); err != nil {
+				return nil, err
+			}
+			res.Message = "已达 50 轮工具调用上限,已暂停。你可以选择继续生成或停止。"
+			return res, nil
 		}
 	}
 

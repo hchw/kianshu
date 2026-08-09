@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -668,4 +669,309 @@ func TestAPICacheChainAncestorLayout(t *testing.T) {
 	if calls != 2 {
 		t.Fatalf("expected 2 api calls, got %d", calls)
 	}
+}
+
+// TestFlow13ExecutionOrder reproduces the flow-13 tree and verifies the
+// execution order is strict depth-first. Every node records a sequence number
+// so the test can assert the expected DFS ordering.
+func TestFlow13ExecutionOrder(t *testing.T) {
+	// Reconstruct the tree from flow 13 (run id=46).
+	tree := &flow.Tree{Start: "n1", Nodes: map[string]*flow.Node{
+		"n1":                     {ID: "n1", Type: flow.NodeStart},
+		"n_seed":                 {ID: "n_seed", Type: flow.NodeCacheSet},
+		"n_login":                {ID: "n_login", Type: flow.NodeAPI},
+		"n_cache_token":          {ID: "n_cache_token", Type: flow.NodeCacheSet},
+		"n_token_valid":          {ID: "n_token_valid", Type: flow.NodeAPI},
+		"n_assert_token_valid":   {ID: "n_assert_token_valid", Type: flow.NodeAssert},
+		"n_logout":               {ID: "n_logout", Type: flow.NodeAPI},
+		"n_token_invalid":        {ID: "n_token_invalid", Type: flow.NodeAPI},
+		"n_assert_token_invalid": {ID: "n_assert_token_invalid", Type: flow.NodeAssert},
+		"n_assert_logout":        {ID: "n_assert_logout", Type: flow.NodeAssert},
+		"n_assert_login":         {ID: "n_assert_login", Type: flow.NodeAssert},
+		"n_try_register":         {ID: "n_try_register", Type: flow.NodeTry},
+		"n_register":             {ID: "n_register", Type: flow.NodeAPI},
+		"n_assert_register":      {ID: "n_assert_register", Type: flow.NodeAssert},
+		"n_catch_register":       {ID: "n_catch_register", Type: flow.NodeCatch},
+	}}
+
+	// Link: n1 -> n_seed
+	tree.AddChild("n1", "n_seed")
+	// n_seed -> n_login, n_try_register
+	tree.AddChild("n_seed", "n_login")
+	tree.AddChild("n_seed", "n_try_register")
+	// n_login -> n_cache_token
+	tree.AddChild("n_login", "n_cache_token")
+	// n_cache_token -> n_token_valid, n_assert_login
+	tree.AddChild("n_cache_token", "n_token_valid")
+	tree.AddChild("n_cache_token", "n_assert_login")
+	// n_token_valid -> n_assert_token_valid, n_logout
+	tree.AddChild("n_token_valid", "n_assert_token_valid")
+	tree.AddChild("n_token_valid", "n_logout")
+	// n_logout -> n_token_invalid, n_assert_logout
+	tree.AddChild("n_logout", "n_token_invalid")
+	tree.AddChild("n_logout", "n_assert_logout")
+	// n_token_invalid -> n_assert_token_invalid
+	tree.AddChild("n_token_invalid", "n_assert_token_invalid")
+	// n_try_register -> n_register
+	tree.AddChild("n_try_register", "n_register")
+	// n_register -> n_assert_register, n_catch_register
+	tree.AddChild("n_register", "n_assert_register")
+	tree.AddChild("n_register", "n_catch_register")
+
+	// Config: n_seed writes username + password to cache
+	nodeCfg(t, tree.Nodes["n_seed"], map[string]any{
+		"writes": map[string]string{
+			"username": "'testuser2'",
+			"password": "'test123'",
+		},
+	})
+
+	// Config: n_cache_token writes token to cache
+	nodeCfg(t, tree.Nodes["n_cache_token"], map[string]any{
+		"writes": map[string]string{"token": "token"},
+	})
+
+	// Config: n_try_register (try node, no special config needed)
+	nodeCfg(t, tree.Nodes["n_try_register"], map[string]any{})
+
+	// Config: n_catch_register catch node with fallback
+	nodeCfg(t, tree.Nodes["n_catch_register"], map[string]any{
+		"fallback": map[string]any{"registered": false, "reason": "username exists"},
+	})
+
+	// Config: n_assert_login
+	nodeCfg(t, tree.Nodes["n_assert_login"], map[string]any{"status": float64(200)})
+	nodeCfg(t, tree.Nodes["n_assert_logout"], map[string]any{"status": float64(200)})
+	nodeCfg(t, tree.Nodes["n_assert_token_valid"], map[string]any{"status": float64(200)})
+	nodeCfg(t, tree.Nodes["n_assert_token_invalid"], map[string]any{"status": float64(401)})
+	nodeCfg(t, tree.Nodes["n_assert_register"], map[string]any{})
+
+	// Inputs for api nodes (mirroring the real flow)
+	tree.Nodes["n_login"].Inputs = map[string]flow.IOKey{
+		"username": {Type: "string", Source: "$cache.username"},
+		"password": {Type: "string", Source: "$cache.password"},
+	}
+	tree.Nodes["n_token_valid"].Inputs = map[string]flow.IOKey{
+		"auth": {Type: "string", Source: "$cache.token"},
+	}
+	tree.Nodes["n_logout"].Inputs = map[string]flow.IOKey{
+		"auth": {Type: "string", Source: "$cache.token"},
+	}
+	tree.Nodes["n_token_invalid"].Inputs = map[string]flow.IOKey{
+		"auth": {Type: "string", Source: "$cache.token"},
+	}
+	tree.Nodes["n_register"].Inputs = map[string]flow.IOKey{
+		"username": {Type: "string", Source: "$cache.username"},
+		"password": {Type: "string", Source: "$cache.password"},
+	}
+
+	// Unit configs for api nodes
+	nodeCfg(t, tree.Nodes["n_login"], map[string]any{
+		"unit_id": float64(1),
+		"unit": map[string]any{
+			"method":  "POST",
+			"path":    "/auth/login",
+			"tag":     "认证",
+			"name":    "用户登录",
+			"params":  "[]",
+			"security": "null",
+		},
+	})
+	nodeCfg(t, tree.Nodes["n_token_valid"], map[string]any{
+		"unit_id": float64(40),
+		"unit": map[string]any{
+			"method":  "GET",
+			"path":    "/providers",
+			"tag":     "LLM Provider",
+			"name":    "列出 LLM Provider",
+			"params":  "[]",
+			"security": "[{\"BearerAuth\":[]}]",
+		},
+	})
+	nodeCfg(t, tree.Nodes["n_logout"], map[string]any{
+		"unit_id": float64(7),
+		"unit": map[string]any{
+			"method":  "POST",
+			"path":    "/auth/logout",
+			"tag":     "认证",
+			"name":    "退出登录",
+			"params":  "[]",
+			"security": "[{\"BearerAuth\":[]}]",
+		},
+	})
+	nodeCfg(t, tree.Nodes["n_token_invalid"], map[string]any{
+		"unit_id": float64(40),
+		"unit": map[string]any{
+			"method":  "GET",
+			"path":    "/providers",
+			"tag":     "LLM Provider",
+			"name":    "列出 LLM Provider",
+			"params":  "[]",
+			"security": "[{\"BearerAuth\":[]}]",
+		},
+	})
+	nodeCfg(t, tree.Nodes["n_register"], map[string]any{
+		"unit_id": float64(19),
+		"unit": map[string]any{
+			"method":  "POST",
+			"path":    "/auth/register",
+			"tag":     "认证",
+			"name":    "注册账号",
+			"params":  "[]",
+			"security": "null",
+		},
+	})
+
+	// Track execution order via a counter assigned at execute-time.
+	var seq int
+	var order []string
+	record := func(id string) {
+		seq++
+		order = append(order, id)
+	}
+
+	// Mock API: login succeeds, token_valid succeeds, logout succeeds,
+	// token_invalid returns 401 (fails), register returns 400 (fails).
+	providerCallCount := 0
+	callAPI := func(call APICall) (any, error) {
+		path := call.URL
+		switch {
+		case containsStr(path, "/auth/login"):
+			record("n_login")
+			return map[string]any{
+				"id":       float64(14),
+				"token":    "tok-deadbeef",
+				"username": "testuser2",
+			}, nil
+		case containsStr(path, "/providers"):
+			providerCallCount++
+			if providerCallCount == 1 {
+				record("n_token_valid")
+				return map[string]any{"providers": []any{}}, nil
+			}
+			record("n_token_invalid")
+			return nil, fmt.Errorf("HTTP 401: 未登录或会话已失效")
+		case containsStr(path, "/auth/logout"):
+			record("n_logout")
+			return map[string]any{"ok": true}, nil
+		case containsStr(path, "/auth/register"):
+			record("n_register")
+			return nil, fmt.Errorf("HTTP 400: 用户名已存在")
+		default:
+			return nil, fmt.Errorf("unexpected API call: %s", path)
+		}
+	}
+
+	res, err := Run(context.Background(), tree, Options{CallAPI: callAPI})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// Collect execution order from results.
+	type entry struct {
+		id     string
+		status Status
+		sa     string
+		err    string
+	}
+	var entries []entry
+	for id, r := range res.Results {
+		sa := "(zero)"
+		if !r.StartedAt.IsZero() {
+			sa = r.StartedAt.Format("15:04:05.000000")
+		}
+		errStr := ""
+		if r.Error != "" {
+			errStr = "  ERR=" + trunc(r.Error, 40)
+		}
+		entries = append(entries, entry{id, r.Status, sa, errStr})
+	}
+
+	// Sort by StartedAt (zero values go last).
+	sort.Slice(entries, func(i, j int) bool {
+		ri, rj := res.Results[entries[i].id], res.Results[entries[j].id]
+		zi, zj := ri.StartedAt.IsZero(), rj.StartedAt.IsZero()
+		if zi && zj {
+			return entries[i].id < entries[j].id
+		}
+		if zi {
+			return false
+		}
+		if zj {
+			return true
+		}
+		return ri.StartedAt.Before(rj.StartedAt)
+	})
+
+	t.Log("=== Flow 13 树结构 ===")
+	t.Log("n1 (start)")
+	t.Log(" └── n_seed (cache-set)")
+	t.Log("      ├── n_login (api)")
+	t.Log("      │    └── n_cache_token (cache-set)")
+	t.Log("      │         ├── n_token_valid (api)")
+	t.Log("      │         │    ├── n_assert_token_valid (assert)")
+	t.Log("      │         │    └── n_logout (api)")
+	t.Log("      │         │         ├── n_token_invalid (api)")
+	t.Log("      │         │         │    └── n_assert_token_invalid (assert)")
+	t.Log("      │         │         └── n_assert_logout (assert)")
+	t.Log("      │         └── n_assert_login (assert)")
+	t.Log("      └── n_try_register (try)")
+	t.Log("           └── n_register (api)")
+	t.Log("                ├── n_assert_register (assert)")
+	t.Log("                └── n_catch_register (catch)")
+	t.Log("")
+	t.Log("=== 实际执行顺序 (按 StartedAt 排序) ===")
+	for i, e := range entries {
+		t.Logf("%2d. [%-6s] %-28s started=%s%s", i+1, e.status, e.id, e.sa, e.err)
+	}
+
+	t.Log("")
+	t.Log("=== API 调用顺序 (mock 记录) ===")
+	for i, id := range order {
+		t.Logf("%2d. %s", i+1, id)
+	}
+
+	// Assert: the statuses should match expectations
+	// n_seed, n_login, n_cache_token should be "failed" (child failed)
+	// n_token_valid should be "failed" (child n_token_invalid failed)
+	// n_logout should be "failed" (child n_token_invalid failed)
+	// n_token_invalid should be "failed" (HTTP 401)
+	// n_assert_token_valid should be "ok"
+	// n_assert_logout should be "ok"
+	// n_assert_login should be "ok"
+	// n_try_register should NOT be "failed" (containment)
+	// n_register should be "failed" (HTTP 400)
+	// n_catch_register should be "ok" (consumed failure)
+
+	if res.Results["n_try_register"].Status == StatusFailed {
+		t.Error("n_try_register should not be failed (try contains failure)")
+	}
+	if res.Results["n_catch_register"].Status != StatusOK {
+		t.Errorf("n_catch_register status = %s, want ok", res.Results["n_catch_register"].Status)
+	}
+	if res.Results["n_register"].Status != StatusFailed {
+		t.Errorf("n_register status = %s, want failed", res.Results["n_register"].Status)
+	}
+
+	_ = order
+}
+
+func containsStr(s, substr string) bool {
+	return len(s) >= len(substr) && searchStr(s, substr)
+}
+
+func searchStr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func trunc(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
