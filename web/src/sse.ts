@@ -3,7 +3,7 @@ import type { AgentEvent } from './api/agent'
 export interface SSESessionHandlers {
   onEvent: (ev: AgentEvent) => void
   onDone: () => void
-  onError: (msg: string) => void
+  onError: (msg: string, status?: number) => void
   onDisconnect: () => void
   onAbort: () => void
 }
@@ -32,7 +32,7 @@ export function openSSE(
       })
       if (!resp.ok || !resp.body) {
         const errText = await resp.text().catch(() => '')
-        h.onError(errText || `请求失败 (${resp.status})`)
+        h.onError(errText || `请求失败 (${resp.status})`, resp.status)
         h.onDone()
         return
       }

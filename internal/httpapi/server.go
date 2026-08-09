@@ -39,6 +39,8 @@ type Server struct {
 	// AgentBus carries in-memory events of active agent runs so clients that
 	// reconnect (page refresh) can pick up missed events.
 	AgentBus *service.AgentEventBus
+	// RunBus broadcasts new execution logs to subscribers in real time.
+	RunBus *service.RunEventBus
 }
 
 // New builds a Server and registers all routes.
@@ -51,13 +53,16 @@ func New(db *gorm.DB, cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Infof("调度器已初始化")
+	runBus := service.NewRunEventBus()
 	s := &Server{
 		DB:        db,
 		Cfg:       cfg,
 		Cipher:    cipher,
 		LLM:       openai.New(),
-		Schedules: service.NewScheduleManager(db, backend, cfg.ExecTimeout),
+		Schedules: service.NewScheduleManager(db, backend, cfg.ExecTimeout, runBus),
 		AgentBus:  service.NewAgentEventBus(),
+		RunBus:    runBus,
 	}
 	return s, nil
 }
@@ -112,6 +117,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/flow/flows/:flowID/versions/:versionNo", s.handleGetVersion)
 		auth.POST("/flow/flows/:flowID/versions/:versionNo/run", s.handleRunVersion)
 		auth.GET("/flow/flows/:flowID/runs", s.handleListRuns)
+		auth.GET("/flow/flows/:flowID/runs/subscribe", s.handleSubscribeRuns)
 		auth.GET("/flow/flows/:flowID/runs/:runID", s.handleGetRun)
 		auth.GET("/flow/flows/:flowID/schedules", s.handleListSchedules)
 		auth.POST("/flow/flows/:flowID/schedules", s.handleCreateSchedule)
@@ -121,6 +127,7 @@ func (s *Server) Routes() *gin.Engine {
 
 		auth.POST("/flow/flows/:flowID/agent/submit", s.handleAgentSubmit)
 		auth.GET("/flow/flows/:flowID/agent/subscribe", s.handleAgentSubscribe)
+	auth.POST("/flow/flows/:flowID/agent/subscribe", s.handleAgentSubscribe)
 		auth.GET("/flow/flows/:flowID/agent/session", s.handleAgentSession)
 		auth.POST("/flow/flows/:flowID/agent/resume", s.handleAgentResume)
 		auth.POST("/flow/flows/:flowID/agent/new", s.handleAgentNew)
@@ -132,6 +139,8 @@ func (s *Server) Routes() *gin.Engine {
 		auth.PATCH("/providers/:id", s.handleUpdateProvider)
 		auth.DELETE("/providers/:id", s.handleDeleteProvider)
 		auth.POST("/providers/:id/test", s.handleTestProvider)
+
+		auth.POST("/utils/cron/describe", s.handleDescribeCron)
 	}
 
 	return r

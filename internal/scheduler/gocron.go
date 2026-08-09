@@ -3,12 +3,14 @@ package scheduler
 import (
 	"errors"
 	"fmt"
-
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-co-op/gocron/v2"
 	"github.com/robfig/cron/v3"
+	log "github.com/sirupsen/logrus"
 )
 
 // ErrJobNotFound indicates the job handle is unknown.
@@ -33,7 +35,7 @@ type GocronScheduler struct {
 
 // NewGocron returns a stopped GocronScheduler. Call Start before schedules fire.
 func NewGocron() (*GocronScheduler, error) {
-	s, err := gocron.NewScheduler()
+	s, err := gocron.NewScheduler(gocron.WithLocation(time.Local))
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +43,10 @@ func NewGocron() (*GocronScheduler, error) {
 }
 
 // Start begins processing registered jobs.
-func (g *GocronScheduler) Start() { g.sched.Start() }
+func (g *GocronScheduler) Start() {
+	log.Info("调度器:启动后台任务处理")
+	g.sched.Start()
+}
 
 // Stop gracefully shuts the scheduler down.
 func (g *GocronScheduler) Stop() {
@@ -55,18 +60,23 @@ func (g *GocronScheduler) Stop() {
 func (g *GocronScheduler) Schedule(cron string, fn func()) (string, error) {
 	handle := fmt.Sprintf("job-%d", atomic.AddUint64(&g.nextID, 1))
 	wrapped := &managedJob{handle: handle}
+	withSec := cronFields(cron) == 6
 	job, err := g.sched.NewJob(
-		gocron.CronJob(cron, false),
+		gocron.CronJob(cron, withSec),
 		gocron.NewTask(func() {
 			if wrapped.paused.Load() {
+				log.Debugf("调度器:任务 %s 已暂停,跳过", handle)
 				return
 			}
+			log.Infof("调度器:任务 %s 开始执行", handle)
 			fn()
+			log.Infof("调度器:任务 %s 执行完毕", handle)
 		}),
 	)
 	if err != nil {
 		return "", err
 	}
+	log.Infof("调度器:已注册任务 %s (cron=%q)", handle, cron)
 	wrapped.job = job
 	g.mu.Lock()
 	g.jobs[handle] = wrapped
@@ -74,10 +84,22 @@ func (g *GocronScheduler) Schedule(cron string, fn func()) (string, error) {
 	return handle, nil
 }
 
-// ValidateCron reports whether cron is a valid standard 5-field expression.
+// ValidateCron reports whether cron is a valid 5-field or 6-field (with seconds) expression.
 func (g *GocronScheduler) ValidateCron(expr string) error {
+	n := cronFields(expr)
+	if n == 6 {
+		parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		_, err := parser.Parse(expr)
+		return err
+	}
 	_, err := cron.ParseStandard(expr)
 	return err
+}
+
+// cronFields returns the number of whitespace-separated fields in a cron expression.
+func cronFields(expr string) int {
+	parts := strings.Fields(expr)
+	return len(parts)
 }
 
 // Remove unregisters a job by handle.

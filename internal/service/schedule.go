@@ -24,12 +24,13 @@ type ScheduleManager struct {
 	db          *gorm.DB
 	scheduler   scheduler.Scheduler
 	execTimeout time.Duration
+	runBus      *RunEventBus
 }
 
 // NewScheduleManager builds a manager over the given backend. execTimeout
 // bounds each scheduled run so a hung job cannot occupy the slot forever.
-func NewScheduleManager(db *gorm.DB, sch scheduler.Scheduler, execTimeout time.Duration) *ScheduleManager {
-	return &ScheduleManager{db: db, scheduler: sch, execTimeout: execTimeout}
+func NewScheduleManager(db *gorm.DB, sch scheduler.Scheduler, execTimeout time.Duration, runBus *RunEventBus) *ScheduleManager {
+	return &ScheduleManager{db: db, scheduler: sch, execTimeout: execTimeout, runBus: runBus}
 }
 
 // Start registers all enabled schedules and starts the backend.
@@ -67,21 +68,30 @@ func (m *ScheduleManager) register(s *model.FlowSchedule) {
 // flow's currently enabled version and records an execution log.
 func (m *ScheduleManager) trigger(scheduleID uint) func() {
 	return func() {
+		log.Infof("调度:触发任务 %d", scheduleID)
 		var s model.FlowSchedule
 		if err := m.db.First(&s, scheduleID).Error; err != nil {
 			log.Warnf("调度:任务 %d 不存在,跳过", scheduleID)
 			return
 		}
 		if !s.Enabled {
+			log.Infof("调度:任务 %d 已停用,跳过", scheduleID)
 			return
 		}
 		var v model.FlowVersion
 		if err := m.db.Where("flow_id = ? AND enabled = ?", s.FlowID, true).First(&v).Error; err != nil {
-			log.Warnf("调度:任务 %d 无启用版本,跳过", scheduleID)
+			log.Warnf("调度:任务 %d (flow=%d) 无启用版本,跳过", scheduleID, s.FlowID)
 			return
 		}
-		if _, err := RunVersion(m.db, s.FlowID, v.VersionNo, m.execTimeout); err != nil {
+		log.Infof("调度:开始执行任务 %d, flow=%d, version=%d", scheduleID, s.FlowID, v.VersionNo)
+		result, err := RunVersion(m.db, s.FlowID, v.VersionNo, m.execTimeout)
+		if err != nil {
 			log.Errorf("调度:任务 %d 执行失败: %v", scheduleID, err)
+		} else {
+			log.Infof("调度:任务 %d 执行成功, run_id=%d, status=%s", scheduleID, result.ID, result.Status)
+			if m.runBus != nil {
+				m.runBus.Publish(result)
+			}
 		}
 	}
 }

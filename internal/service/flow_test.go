@@ -394,7 +394,7 @@ func TestRunVersionBindsVersionID(t *testing.T) {
 		t.Fatalf("version run should bind version id %d no %d, got %d/%d", v.ID, v.VersionNo, log.VersionID, log.VersionNo)
 	}
 
-	logs, err := ListRuns(gdb, flowID)
+	logs, _, err := ListRuns(gdb, flowID, 1, 20)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestDeleteFlow(t *testing.T) {
 	if err := gdb.Create(&model.FlowSchedule{FlowID: f.ID, TestSetID: 1, Cron: "0 * * * *", JobID: "job-1"}).Error; err != nil {
 		t.Fatalf("create schedule: %v", err)
 	}
-	mgr := NewScheduleManager(gdb, fs, time.Minute)
+	mgr := NewScheduleManager(gdb, fs, time.Minute, nil)
 
 	if err := DeleteFlow(gdb, mgr, f.ID); err != nil {
 		t.Fatalf("delete flow: %v", err)

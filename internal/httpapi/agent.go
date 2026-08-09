@@ -223,7 +223,7 @@ func jsonString(v any) string {
 // lost its original SSE connection (page refresh) can resume receiving events.
 //
 //	@Summary	订阅 Agent 运行事件（断线重连）
-//	@Description	当页面刷新后原 SSE 连接断开时，通过此端点重新接收正在运行的 Agent 事件。需要读权限。
+//	@Description	当页面刷新后原 SSE 连接断开时，通过此端点重新接收正在运行的 Agent 事件。若无正在运行的任务则返回 404。需要读权限。
 //	@Tags		LLM Agent
 //	@Produce	text/event-stream
 //	@Security	BearerAuth
@@ -232,10 +232,16 @@ func jsonString(v any) string {
 //	@Success	200	{string}	string	"SSE 事件流"
 //	@Failure	400	{object}	errorResp	"无效的流 ID"
 //	@Failure	403	{object}	errorResp	"无权访问该流"
+//	@Failure	404	{object}	errorResp	"当前没有正在运行的 Agent 任务"
 //	@Router		/flow/flows/{flowID}/agent/subscribe [get]
 func (s *Server) handleAgentSubscribe(c *gin.Context) {
 	flowID, _, ok := s.flowReadable(c)
 	if !ok {
+		return
+	}
+	// 没有正在运行的 Agent 任务时返回 404，客户端（断线重连）据此静默处理，不在页面上报错。
+	if !s.AgentBus.Active(flowID) {
+		writeErr(c, http.StatusNotFound, "当前没有正在运行的 Agent 任务")
 		return
 	}
 	since := 0

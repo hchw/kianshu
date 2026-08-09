@@ -568,3 +568,104 @@ func TestCacheSetProducerPush(t *testing.T) {
 		t.Fatalf("cache-set should have run as tree node, got %+v", res.Results["n2"])
 	}
 }
+
+func TestAPIAuthHeaderFromSecurityScheme(t *testing.T) {
+	cases := []struct {
+		name     string
+		security string
+		key      string
+		value    string
+		wantKey  string
+		wantVal  string
+	}{
+		{"bearer 裸 token 加前缀", `[{"BearerAuth":[]}]`, "auth", "abc123", "Authorization", "Bearer abc123"},
+		{"bearer 已带前缀不重复", `[{"BearerAuth":[]}]`, "auth", "Bearer abc123", "Authorization", "Bearer abc123"},
+		{"apikey 走 X-API-Key", `[{"apikey":[]}]`, "api_key", "k-9", "X-API-Key", "k-9"},
+		{"无声明保持原键原值", "", "authorization", "raw", "authorization", "raw"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var got APICall
+			tree := treeOf(map[string]*flow.Node{
+				"n1": flow.NewNode("n1", flow.NodeStart),
+				"n2": flow.NewNode("n2", flow.NodeAPI),
+			})
+			unit := map[string]any{"method": "GET", "path": "/x"}
+			if c.security != "" {
+				unit["security"] = c.security
+			}
+			nodeCfg(t, tree.Nodes["n2"], map[string]any{"unit": unit})
+			tree.Nodes["n2"].Inputs = map[string]flow.IOKey{c.key: {Type: flow.IOTypePrimitive}}
+			tree.AddChild("n1", "n2")
+			res, err := Run(context.Background(), tree, Options{
+				Host:        "http://x",
+				StartParams: map[string]any{c.key: c.value},
+				CallAPI: func(call APICall) (any, error) {
+					got = call
+					return map[string]any{}, nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if res.Status != StatusOK {
+				t.Fatalf("status = %s", res.Status)
+			}
+			if got.Headers[c.wantKey] != c.wantVal {
+				t.Fatalf("header = %v, want %s=%s", got.Headers, c.wantKey, c.wantVal)
+			}
+		})
+	}
+}
+
+// TestAPICacheChainAncestorLayout 祖先结构链路:login 输出 token → cache-set
+// 写入共享缓存(挂在 login 下)→ reader 挂在 cache-set 下读取 $cache.token,
+// 执行顺序由"父先于子"保证,无需同级排序。
+func TestAPICacheChainAncestorLayout(t *testing.T) {
+	var readerCall APICall
+	tree := treeOf(map[string]*flow.Node{
+		"n1": flow.NewNode("n1", flow.NodeStart),
+		"n2": flow.NewNode("n2", flow.NodeAPI),
+		"cs": flow.NewNode("cs", flow.NodeCacheSet),
+		"n3": flow.NewNode("n3", flow.NodeAPI),
+	})
+	nodeCfg(t, tree.Nodes["n2"], map[string]any{"unit": map[string]any{"method": "POST", "path": "/login"}})
+	nodeCfg(t, tree.Nodes["cs"], map[string]any{"writes": map[string]string{"token": "token"}})
+	nodeCfg(t, tree.Nodes["n3"], map[string]any{"unit": map[string]any{
+		"method": "GET", "path": "/test-sets", "security": `[{"BearerAuth":[]}]`,
+	}})
+	tree.Nodes["n2"].Inputs = map[string]flow.IOKey{
+		"username": {Type: flow.IOTypePrimitive, Source: "username"},
+		"password": {Type: flow.IOTypePrimitive, Source: "password"},
+	}
+	tree.Nodes["n3"].Inputs = map[string]flow.IOKey{"auth": {Type: flow.IOTypePrimitive, Source: "$cache.token"}}
+	tree.AddChild("n1", "n2")
+	tree.AddChild("n2", "cs")
+	tree.AddChild("cs", "n3")
+
+	calls := 0
+	res, err := Run(context.Background(), tree, Options{
+		Host:        "http://x",
+		StartParams: map[string]any{"username": "u", "password": "p"},
+		CallAPI: func(c APICall) (any, error) {
+			calls++
+			if calls == 1 {
+				return map[string]any{"token": "abc123"}, nil
+			}
+			readerCall = c
+			return map[string]any{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != StatusOK {
+		t.Fatalf("status = %s, results: %v", res.Status, res.Results)
+	}
+	if readerCall.Headers["Authorization"] != "Bearer abc123" {
+		t.Fatalf("reader auth header = %v, want Authorization: Bearer abc123", readerCall.Headers)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 api calls, got %d", calls)
+	}
+}

@@ -289,8 +289,9 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 	}
 	var cfg struct {
 		Unit struct {
-			Method string `json:"method"`
-			Path   string `json:"path"`
+			Method   string `json:"method"`
+			Path     string `json:"path"`
+			Security string `json:"security"`
 		} `json:"unit"`
 		Params map[string]any `json:"params,omitempty"`
 	}
@@ -326,11 +327,26 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 	headers := map[string]string{}
 	query := map[string]any{}
 	body := map[string]any{}
+	scheme := execSecurityScheme(cfg.Unit.Security)
 	for k, v := range merged {
 		switch {
 		case isAuthKey(k):
+			// 认证输入按单元声明的 security 方案构造请求头(与后端契约对齐):
+			// BearerAuth → Authorization: Bearer <token>;apikey → X-API-Key;
+			// 无声明时保持既有行为(原键名 + 原值)。
 			if s, ok := v.(string); ok {
-				headers[k] = s
+				switch scheme {
+				case "token":
+					prefix := "Bearer "
+					if strings.HasPrefix(s, prefix) {
+						prefix = ""
+					}
+					headers["Authorization"] = prefix + s
+				case "apikey":
+					headers["X-API-Key"] = s
+				default:
+					headers[k] = s
+				}
 			}
 		case hasRequestBody(method):
 			body[k] = v
@@ -552,10 +568,36 @@ func toFloat(v any) (float64, bool) {
 // token (mirrors the validator's rule).
 func isAuthKey(key string) bool {
 	lk := strings.ToLower(key)
-	for _, token := range []string{"authorization", "token", "api-key", "apikey", "cookie", "auth"} {
+	for _, token := range []string{"authorization", "token", "api-key", "apikey", "api_key", "cookie", "auth"} {
 		if strings.Contains(lk, token) {
 			return true
 		}
 	}
 	return false
+}
+
+// execSecurityScheme classifies a unit's swagger security declaration into a
+// header-construction scheme: "token" (Bearer/OAuth) or "apikey". Empty when
+// the unit declares no security (公开接口) or the declaration is unparsable.
+// Mirrors service.securityScheme so execution matches the generation briefs.
+func execSecurityScheme(securityJSON string) string {
+	if securityJSON == "" || securityJSON == "null" {
+		return ""
+	}
+	var secs []map[string]any
+	if err := json.Unmarshal([]byte(securityJSON), &secs); err != nil {
+		return ""
+	}
+	for _, s := range secs {
+		for name := range s {
+			low := strings.ToLower(name)
+			switch {
+			case strings.Contains(low, "bearer"), strings.Contains(low, "oauth"), strings.Contains(low, "token"):
+				return "token"
+			case strings.Contains(low, "apikey"), strings.Contains(low, "api_key"), strings.Contains(low, "x-api-key"):
+				return "apikey"
+			}
+		}
+	}
+	return ""
 }

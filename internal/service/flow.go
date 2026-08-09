@@ -276,9 +276,6 @@ func SaveAndEnable(db *gorm.DB, flowID, userID uint) (*model.FlowVersion, *flow.
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := SnapshotAPINodes(db, tree); err != nil {
-		return nil, nil, err
-	}
 	opts := flow.ValidatorOptions{
 		UnitDeleted: func(unitID uint) bool {
 			var unit model.TestUnit
@@ -288,6 +285,11 @@ func SaveAndEnable(db *gorm.DB, flowID, userID uint) (*model.FlowVersion, *flow.
 	res := flow.Validate(tree, opts)
 	if res.HasErrors() {
 		return nil, &res, ErrFlowValidation
+	}
+
+	// 校验通过后再快照单元元数据，避免自动注入的 inputs 干扰校验结果。
+	if err := SnapshotAPINodes(db, tree); err != nil {
+		return nil, nil, err
 	}
 
 	var version *model.FlowVersion
