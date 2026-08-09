@@ -67,6 +67,7 @@ func (e *engine) runTry(n *flow.Node, parentOut any) Status {
 	}
 	e.record(n.ID, status, parentOut, scope.output, nil)
 	e.results[n.ID].StartedAt = started
+	e.results[n.ID].FinishedAt = time.Now()
 	return status
 }
 
@@ -100,19 +101,24 @@ func (e *engine) execCatchFailure(id, tryID string, parentOut any) any {
 	if !ok || n == nil {
 		return nil
 	}
+	started := time.Now()
 	fallback := e.catchFallback(n)
 	if _, ran := e.results[id]; ran {
 		e.results[id].Output = fallback
 		e.results[id].Status = StatusOK
+		e.results[id].StartedAt = started
+		e.results[id].FinishedAt = time.Now()
 		e.doneCatch[id] = true
 		return fallback
 	}
 	e.doneCatch[id] = true
 	e.record(id, StatusOK, parentOut, fallback, nil)
+	e.results[id].StartedAt = started
 	// Continue with the catch's children, carrying the fallback as output.
 	for _, child := range n.Children {
 		e.runNode(child, fallback)
 	}
+	e.results[id].FinishedAt = time.Now()
 	return fallback
 }
 
@@ -237,6 +243,7 @@ func (e *engine) runLoop(n *flow.Node, parentOut any) Status {
 	}
 	e.record(n.ID, status, input, out, nil)
 	e.results[n.ID].StartedAt = started
+	e.results[n.ID].FinishedAt = time.Now()
 	return status
 }
 
