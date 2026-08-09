@@ -1,22 +1,36 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
+  Handle,
   Position,
   useReactFlow,
   useNodesState,
   applyNodeChanges,
   type Node,
   type Edge,
+  type NodeProps,
   type OnNodesChange,
   type OnNodeDrag,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { FlowTree } from '../../api/flow'
 import { layoutTree, linkAllowed, NODE_LABELS } from '../../lib/tree'
+import { statusLabel } from '../results/ResultsPanel'
 import NodePanel from './NodePanel'
+
+export interface NodeRunStatus {
+  node_id: string
+  status: string
+  input?: unknown
+  output?: unknown
+  error?: string
+  started_at?: string
+  finished_at?: string
+}
 
 interface Props {
   tree: FlowTree
@@ -26,6 +40,8 @@ interface Props {
   onSaved: () => void
   onDelete: (id: string) => void
   testSetID: number
+  /** 最近一次试运行的节点结果，key 为 node_id */
+  nodeResults: Record<string, NodeRunStatus> | null
 }
 
 const COLORS: Record<string, string> = {
@@ -41,6 +57,47 @@ const COLORS: Record<string, string> = {
 
 const PALETTE_KEY = 'kianshu_palette_open'
 
+// 模块级 ref：自定义节点组件通过此 ref 调用画布的 popover 打开逻辑
+type PopoverOpener = (nodeId: string, result: NodeRunStatus, anchor: HTMLElement) => void
+const gPopoverOpener: { current: PopoverOpener | null } = { current: null }
+
+function KianshuNode(props: NodeProps) {
+  const data = props.data as Record<string, unknown>
+  const label = data.label as string
+  const nr = data.nodeResult as NodeRunStatus | undefined
+  const status = data.status as string | undefined
+  const dotRef = useRef<HTMLDivElement>(null)
+
+  const dotColor =
+    status === 'failed'
+      ? 'var(--danger)'
+      : status === 'ok' || status === 'soft-stop'
+        ? 'var(--ok)'
+        : undefined
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} style={{ visibility: 'hidden' }} />
+      {dotColor && nr && (
+        <div
+          ref={dotRef}
+          className="node-status-dot"
+          style={{ background: dotColor }}
+          title={`${statusLabel(status!)} — 点击查看详情`}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (dotRef.current && gPopoverOpener.current) {
+              gPopoverOpener.current(props.id, nr, dotRef.current)
+            }
+          }}
+        />
+      )}
+      <div style={{ whiteSpace: 'pre-line', textAlign: 'center' }}>{label}</div>
+      <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
+    </>
+  )
+}
+
 export default function FlowCanvas(props: Props) {
   return (
     <ReactFlowProvider>
@@ -49,7 +106,7 @@ export default function FlowCanvas(props: Props) {
   )
 }
 
-function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete, testSetID }: Props) {
+function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete, testSetID, nodeResults }: Props) {
   const [paletteOpen, setPaletteOpen] = useState(() => localStorage.getItem(PALETTE_KEY) !== '0')
   const togglePalette = () =>
     setPaletteOpen((o) => {
@@ -58,6 +115,16 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
     })
   const draggingRef = useRef(false)
 
+  // 节点状态点 popover
+  const [dotPopover, setDotPopover] = useState<{
+    nodeId: string
+    result: NodeRunStatus
+    x: number
+    y: number
+  } | null>(null)
+  const dotPopoverRef = useRef<HTMLDivElement>(null)
+  const skipDotCloseRef = useRef(false)
+
   // 从 tree 计算节点（仅结构/坐标来源，不含拖拽中间态）
   const treeNodes: Node[] = useMemo(() => {
     const { positions, ordered } = layoutTree(tree)
@@ -65,12 +132,27 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
       const n = tree.nodes[id]
       const pos = positions.get(id)!
       const color = COLORS[n?.type ?? ''] ?? 'var(--node-default)'
+      const nr = nodeResults?.[id]
       return {
         id,
-        type: 'default',
+        type: 'kianshu',
         position: { x: pos.x, y: pos.y },
-        className: 'flow-node',
-        data: { label: `${NODE_LABELS[n?.type ?? ''] ?? n?.type}\n${id}` },
+        className: `flow-node type-${n?.type ?? ''}`,
+        data: {
+          label: `${NODE_LABELS[n?.type ?? ''] ?? n?.type}\n${id}`,
+          nodeType: n?.type ?? '',
+          status: nr?.status ?? undefined,
+          nodeResult: nr ?? undefined,
+          style: {
+            width: 120,
+            borderColor: selected === id ? 'var(--primary)' : 'var(--border)',
+            borderWidth: selected === id ? 2 : 1,
+            borderRadius: 'var(--radius-10)',
+            background: 'var(--surface)',
+            color: 'var(--text)',
+            boxShadow: selected === id ? 'var(--shadow-md)' : 'var(--shadow-sm)',
+          } as Record<string, string>,
+        },
         style: {
           ...({ '--node-color': color } as Record<string, string>),
           width: 120,
@@ -83,7 +165,7 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
         },
       }
     })
-  }, [tree, selected])
+  }, [tree, selected, nodeResults])
 
   const [nodes, setNodes] = useNodesState(treeNodes)
 
@@ -129,6 +211,23 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
   }, [tree])
 
   const { fitView } = useReactFlow()
+
+  // 点击弹窗外关闭
+  useEffect(() => {
+    if (!dotPopover) return
+    const handler = (e: MouseEvent) => {
+      if (skipDotCloseRef.current) {
+        skipDotCloseRef.current = false
+        return
+      }
+      const target = e.target as HTMLElement
+      if (target.closest('.node-status-dot')) return
+      if (dotPopoverRef.current?.contains(target)) return
+      setDotPopover(null)
+    }
+    document.addEventListener('mousedown', handler, true)
+    return () => document.removeEventListener('mousedown', handler, true)
+  }, [dotPopover])
 
   // 仅在首次挂载时适配视口，不在每次拖拽/更新时重复触发
   useEffect(() => {
@@ -190,6 +289,33 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
     ev.preventDefault()
   }
 
+  // 打开节点状态弹窗
+  const openDotPopover = (nodeId: string, result: NodeRunStatus, anchor: HTMLElement) => {
+    const rect = anchor.getBoundingClientRect()
+    skipDotCloseRef.current = true
+    setDotPopover({
+      nodeId,
+      result,
+      x: Math.min(rect.left, window.innerWidth - 316),
+      y: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 340)),
+    })
+  }
+
+  // 将 openDotPopover 挂到模块级 ref 供 KianshuNode 调用
+  useEffect(() => {
+    gPopoverOpener.current = openDotPopover
+    return () => {
+      gPopoverOpener.current = null
+    }
+  })
+
+  const nodeTypes = useMemo(
+    () => ({
+      kianshu: KianshuNode,
+    }),
+    [],
+  )
+
   return (
     <div className="editor-main">
       <aside className={paletteOpen ? 'palette-rail' : 'palette-rail collapsed'}>
@@ -224,6 +350,7 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
         <ReactFlow
           nodes={nodes}
           edges={edges}
+          nodeTypes={nodeTypes}
           onConnect={onConnect}
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
@@ -249,6 +376,58 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
         />
       )}
       </div>
+
+      {/* 节点状态点 popover（portal 到 body，避开 ReactFlow transform） */}
+      {dotPopover &&
+        createPortal(
+          <div
+            ref={dotPopoverRef}
+            className="node-log-popover"
+            style={{ left: dotPopover.x, top: dotPopover.y }}
+          >
+            <div className="popover-head">
+              <span className="strong mono">{dotPopover.nodeId}</span>
+              <span className={`badge ${dotPopover.result.status === 'failed' ? 'failed' : 'ok'}`}>
+                {statusLabel(dotPopover.result.status)}
+              </span>
+              <button className="link" onClick={() => setDotPopover(null)}>
+                ✕
+              </button>
+            </div>
+            {dotPopover.result.error && (
+              <div className="popover-section">
+                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>错误</div>
+                <pre style={{ color: 'var(--danger)' }}>{dotPopover.result.error}</pre>
+              </div>
+            )}
+            {dotPopover.result.input !== undefined && (
+              <div className="popover-section">
+                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>输入</div>
+                <pre>{safeStringify(dotPopover.result.input)}</pre>
+              </div>
+            )}
+            {dotPopover.result.output !== undefined && (
+              <div className="popover-section">
+                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>输出</div>
+                <pre>{safeStringify(dotPopover.result.output)}</pre>
+              </div>
+            )}
+            {!dotPopover.result.error &&
+              dotPopover.result.input === undefined &&
+              dotPopover.result.output === undefined && (
+                <div className="muted" style={{ padding: 8 }}>无详细数据</div>
+              )}
+          </div>,
+          document.body,
+        )}
     </div>
   )
+}
+
+function safeStringify(v: unknown): string {
+  try {
+    return JSON.stringify(v, null, 2)
+  } catch {
+    return String(v)
+  }
 }

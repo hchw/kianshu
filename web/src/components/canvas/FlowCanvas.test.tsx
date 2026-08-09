@@ -19,7 +19,13 @@ vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: React.ReactNode }) =>
     React.createElement('div', null, children),
   Background: () => null,
+  Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
   useReactFlow: () => ({ fitView: h.fitView }),
+  useNodesState: (init: any) => {
+    const [nodes, setNodes] = React.useState(init)
+    return [nodes, setNodes, () => {}]
+  },
+  applyNodeChanges: (changes: any, nodes: any) => nodes,
 }))
 
 import FlowCanvas from './FlowCanvas'
@@ -35,7 +41,7 @@ function sampleTree(): FlowTree {
 }
 
 describe('FlowCanvas', () => {
-  it('renders all edges as bezier curves', () => {
+  it('renders all edges with default type', () => {
     render(
       <FlowCanvas
         tree={sampleTree()}
@@ -45,14 +51,15 @@ describe('FlowCanvas', () => {
         onSaved={vi.fn()}
         onDelete={vi.fn()}
         testSetID={1}
+        nodeResults={null}
       />,
     )
     const edges = h.rfProps.current.edges
     expect(edges.length).toBe(1)
-    expect(edges[0].type).toBe('bezier')
+    expect(edges[0].type).toBe('default')
   })
 
-  it('mirrors position changes into the tree without saving', () => {
+  it('commits position on drag stop and saves', () => {
     const onTreeChange = vi.fn()
     const onSaved = vi.fn()
     render(
@@ -63,15 +70,16 @@ describe('FlowCanvas', () => {
         onTreeChange={onTreeChange}
         onSaved={onSaved}
         testSetID={1}
+        nodeResults={null}
       />,
     )
-    const onNodesChange = h.rfProps.current.onNodesChange
-    onNodesChange([{ type: 'position', id: 'n2', position: { x: 12.5, y: 34.25 }, dragging: true }])
+    const onNodeDragStop = h.rfProps.current.onNodeDragStop
+    onNodeDragStop({}, { id: 'n2', position: { x: 12.5, y: 34.25 } })
     expect(onTreeChange).toHaveBeenCalledTimes(1)
     const next = onTreeChange.mock.calls[0][0] as FlowTree
     expect(next.nodes.n2.x).toBe(12.5)
     expect(next.nodes.n2.y).toBe(34.25)
-    expect(onSaved).not.toHaveBeenCalled()
+    expect(onSaved).toHaveBeenCalledTimes(1)
   })
 
   it('persists the final position on drag stop', () => {
@@ -85,6 +93,7 @@ describe('FlowCanvas', () => {
         onTreeChange={onTreeChange}
         onSaved={onSaved}
         testSetID={1}
+        nodeResults={null}
       />,
     )
     const onNodeDragStop = h.rfProps.current.onNodeDragStop
@@ -110,6 +119,7 @@ describe('FlowCanvas', () => {
         onSaved={vi.fn()}
         onDelete={vi.fn()}
         testSetID={1}
+        nodeResults={null}
       />,
     )
     fireEvent.click(screen.getByText('自动重排'))

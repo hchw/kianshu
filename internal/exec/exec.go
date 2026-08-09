@@ -102,19 +102,24 @@ func Run(ctx context.Context, t *flow.Tree, opts Options) (*RunResult, error) {
 		doneCatch:  map[string]bool{},
 		ctx:      ctx,
 	}
+	started := time.Now()
 	startOut, startErr := e.execute(start, nil)
 	if startErr != nil {
 		e.record(t.Start, StatusFailed, nil, nil, startErr)
+		e.results[t.Start].StartedAt = started
+		e.results[t.Start].FinishedAt = time.Now()
 		e.rootStatus = StatusFailed
 		return &RunResult{Results: e.results, Cache: e.cache, Status: e.rootStatus}, nil
 	}
 	e.record(t.Start, StatusOK, nil, startOut, nil)
+	e.results[t.Start].StartedAt = started
 	status := StatusOK
 	for _, child := range start.Children {
 		if e.runNode(child, startOut) == StatusFailed {
 			status = StatusFailed
 		}
 	}
+	e.results[t.Start].FinishedAt = time.Now()
 	e.rootStatus = status
 	return &RunResult{Results: e.results, Cache: e.cache, Status: e.rootStatus}, nil
 }
@@ -171,6 +176,8 @@ func (e *engine) runNode(id string, parentOut any) Status {
 	out, err := e.execute(n, input)
 	if err != nil {
 		e.record(id, StatusFailed, input, nil, err)
+		e.results[id].StartedAt = started
+		e.results[id].FinishedAt = time.Now()
 		return StatusFailed
 	}
 	e.record(id, StatusOK, input, out, nil)
@@ -180,10 +187,8 @@ func (e *engine) runNode(id string, parentOut any) Status {
 			status = StatusFailed
 		}
 	}
-	if status != StatusOK {
-		e.results[id].Status = status
-	}
 	e.results[id].StartedAt = started
+	e.results[id].FinishedAt = time.Now()
 	return status
 }
 
@@ -496,8 +501,9 @@ func getByPath(v any, path string) (any, bool) {
 }
 
 // cacheSetOutput evaluates each configured write expression against the
-// current input, stores the values in the run-scoped cache, and outputs the
-// entire current cache.
+// current input, stores the values in the run-scoped cache, and returns a
+// snapshot copy of the cache so that later cache writes do not retroactively
+// mutate this node's recorded output.
 func (e *engine) cacheSetOutput(n *flow.Node, input any) (any, error) {
 	var cfg struct {
 		Writes map[string]string `json:"writes"`
@@ -512,7 +518,11 @@ func (e *engine) cacheSetOutput(n *flow.Node, input any) (any, error) {
 		}
 		e.cache[k] = v
 	}
-	return e.cache, nil
+	out := make(map[string]any, len(e.cache))
+	for k, v := range e.cache {
+		out[k] = v
+	}
+	return out, nil
 }
 
 // gt compares numeric (or string) values for greater-than.

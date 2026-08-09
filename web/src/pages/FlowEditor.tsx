@@ -17,6 +17,8 @@ import {
   type FlowVersion,
 } from '../api/flow'
 import { listProviders, type Provider } from '../api/providers'
+import { parseNodeResults } from '../components/results/ResultsPanel'
+import type { NodeRunStatus } from '../components/canvas/FlowCanvas'
 import { parseTree, validateTreeShape, deleteNode } from '../lib/tree'
 import AppLayout from '../components/layout/AppLayout'
 import FlowCanvas from '../components/canvas/FlowCanvas'
@@ -53,6 +55,7 @@ export default function FlowEditor() {
     })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [lastNodeResults, setLastNodeResults] = useState<Record<string, NodeRunStatus> | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +92,21 @@ export default function FlowEditor() {
     })
     return () => sub.close()
   }, [fid])
+
+  // 从最新 run 的 node_results 提取节点执行状态，用于画布节点上的状态点渲染
+  const prevRunsTopId = useRef<number>(0)
+  useEffect(() => {
+    if (runs.length === 0) return
+    const latest = runs[0]
+    if (latest.id === prevRunsTopId.current) return
+    prevRunsTopId.current = latest.id
+    const parsed = parseNodeResults(latest.node_results)
+    const map: Record<string, NodeRunStatus> = {}
+    for (const nr of parsed) {
+      map[nr.node_id] = nr
+    }
+    setLastNodeResults(map)
+  }, [runs])
 
   const loadRunsPage = async (p: number) => {
     setRunsPage(p)
@@ -226,6 +244,7 @@ export default function FlowEditor() {
           onSaved={() => save()}
           onDelete={handleDeleteNode}
           testSetID={draft.test_set_id}
+          nodeResults={lastNodeResults}
         />
         <aside className={sideOpen ? 'side' : 'side collapsed'}>
           <button

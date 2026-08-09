@@ -932,9 +932,9 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	}
 
 	// Assert: the statuses should match expectations
-	// n_seed, n_login, n_cache_token should be "failed" (child failed)
-	// n_token_valid should be "failed" (child n_token_invalid failed)
-	// n_logout should be "failed" (child n_token_invalid failed)
+	// n_seed, n_login, n_cache_token should be "ok" (own execution succeeded)
+	// n_token_valid should be "ok" (own execution succeeded)
+	// n_logout should be "ok" (own execution succeeded)
 	// n_token_invalid should be "failed" (HTTP 401)
 	// n_assert_token_valid should be "ok"
 	// n_assert_logout should be "ok"
@@ -943,11 +943,16 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	// n_register should be "failed" (HTTP 400)
 	// n_catch_register should be "ok" (consumed failure)
 
+	okNodes := []string{"n_seed", "n_login", "n_cache_token", "n_token_valid",
+		"n_logout", "n_assert_token_valid", "n_assert_logout", "n_assert_login",
+		"n_catch_register"}
+	for _, id := range okNodes {
+		if r, ok := res.Results[id]; ok && r.Status != StatusOK {
+			t.Errorf("%s status = %s, want ok", id, r.Status)
+		}
+	}
 	if res.Results["n_try_register"].Status == StatusFailed {
 		t.Error("n_try_register should not be failed (try contains failure)")
-	}
-	if res.Results["n_catch_register"].Status != StatusOK {
-		t.Errorf("n_catch_register status = %s, want ok", res.Results["n_catch_register"].Status)
 	}
 	if res.Results["n_register"].Status != StatusFailed {
 		t.Errorf("n_register status = %s, want failed", res.Results["n_register"].Status)
