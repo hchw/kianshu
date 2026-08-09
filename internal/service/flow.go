@@ -71,6 +71,23 @@ func UpdateDraft(db *gorm.DB, flowID uint, name, treeJSON string) (*model.FlowDr
 	return d, nil
 }
 
+// StripOrphanInputs 移除所有 Source 为空的 input。
+// 这些 input 在执行中无实际作用（resolveInputs 解析不到就跳过），
+// 仅会产生校验假阳性（contract.input_unresolved）。
+// 有 source 的 input（如 auth 类 $cache.token）不受影响。
+func StripOrphanInputs(tree *flow.Tree) {
+	for _, n := range tree.Nodes {
+		if n == nil || len(n.Inputs) == 0 {
+			continue
+		}
+		for k, v := range n.Inputs {
+			if v.Source == "" {
+				delete(n.Inputs, k)
+			}
+		}
+	}
+}
+
 // DeleteFlow hard-deletes a flow and all of its associated data: draft,
 // versions, execution logs and schedules. Registered cron jobs are cancelled
 // after the transaction commits so no orphan schedule keeps firing. sched may
@@ -233,16 +250,19 @@ func SnapshotAPINodes(db *gorm.DB, tree *flow.Tree) error {
 		n.Config = cfgJSON
 
 		// 自动填充 I/O 契约：从 Swagger 参数定义推导 inputs。
+		// 仅注入带有 source 的 input（如 auth 类 → $cache.token），
+		// 无 source 的 input（如 request_body 的 body）不注入，避免校验假阳性。
 		derived := deriveInputs(unit)
 		if len(derived) > 0 {
-			if len(n.Inputs) == 0 {
-				n.Inputs = derived
-			} else {
-				// 只追加 Swagger 中有但 inputs 中没有的 key，保护已有 source 不覆盖。
-				for k, v := range derived {
-					if _, exists := n.Inputs[k]; !exists {
-						n.Inputs[k] = v
+			for k, v := range derived {
+				if v.Source == "" {
+					continue
+				}
+				if _, exists := n.Inputs[k]; !exists {
+					if len(n.Inputs) == 0 {
+						n.Inputs = map[string]flow.IOKey{}
 					}
+					n.Inputs[k] = v
 				}
 			}
 		}
@@ -276,6 +296,8 @@ func SaveAndEnable(db *gorm.DB, flowID, userID uint) (*model.FlowVersion, *flow.
 	if err != nil {
 		return nil, nil, err
 	}
+	// 清理旧版本恢复带入的无 source input（如 body），避免校验假阳性。
+	StripOrphanInputs(tree)
 	opts := flow.ValidatorOptions{
 		UnitDeleted: func(unitID uint) bool {
 			var unit model.TestUnit

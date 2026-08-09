@@ -337,7 +337,7 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
             onClick={() => toggleNode(id)}
             title={id}
           >
-            {NODE_LABELS[tree.nodes[id]?.type ?? ''] ?? tree.nodes[id]?.type}
+            {NODE_LABELS[tree.nodes[id]?.type ?? ''] ?? tree.nodes[id]?.type} · {id}
           </button>
         ))}
       </div>

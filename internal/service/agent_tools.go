@@ -47,10 +47,12 @@ type ToolContext struct {
 
 // ToolResult is the structured outcome of one tool call, fed back to the LLM.
 type ToolResult struct {
-	OK             bool   `json:"ok"`
-	Data           any    `json:"data,omitempty"`
-	Error          string `json:"error,omitempty"`
-	ExpectedFormat string `json:"expected_format,omitempty"`
+	OK             bool            `json:"ok"`
+	Data           any             `json:"data,omitempty"`
+	Error          string          `json:"error,omitempty"`
+	ExpectedFormat string          `json:"expected_format,omitempty"`
+	Paused         bool            `json:"paused,omitempty"`
+	Questions      []PauseQuestion `json:"questions,omitempty"`
 }
 
 // toolError builds a failed ToolResult with a corrected-format hint.
@@ -201,7 +203,21 @@ func execUpdateNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 		return toolError("先 create_node 或从 get_flow 读取现有 id", "节点不存在: %s", a.ID)
 	}
 	if !inScope(ctx, a.ID) {
-		return toolError("", "节点 %s 不在本次勾选的修改范围内", a.ID)
+		nodeType := string(node.Type)
+		toolArgs, _ := json.Marshal(a)
+		return &ToolResult{
+			Paused: true,
+			Questions: []PauseQuestion{{
+				ID:        "scope-" + a.ID,
+				Type:      "scope",
+				Question:  fmt.Sprintf("Agent 想修改节点 %s(%s)，但该节点不在你勾选的修改范围内。是否允许？", a.ID, nodeType),
+				Options:   []string{"允许", "拒绝", "允许本次全部越界节点"},
+				NodeID:    a.ID,
+				NodeType:  nodeType,
+				Operation: toolUpdateNode,
+				ToolArgs:  string(toolArgs),
+			}},
+		}
 	}
 	if a.Inputs != nil {
 		node.Inputs = a.Inputs
@@ -230,7 +246,21 @@ func execDeleteNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 		return toolError("", "不能删除 start 根节点")
 	}
 	if !inScope(ctx, a.ID) {
-		return toolError("", "节点 %s 不在本次勾选的修改范围内", a.ID)
+		nodeType := string(node.Type)
+		toolArgs, _ := json.Marshal(a)
+		return &ToolResult{
+			Paused: true,
+			Questions: []PauseQuestion{{
+				ID:        "scope-" + a.ID,
+				Type:      "scope",
+				Question:  fmt.Sprintf("Agent 想删除节点 %s(%s)，但该节点不在你勾选的修改范围内。是否允许？", a.ID, nodeType),
+				Options:   []string{"允许", "拒绝", "允许本次全部越界节点"},
+				NodeID:    a.ID,
+				NodeType:  nodeType,
+				Operation: toolDeleteNode,
+				ToolArgs:  string(toolArgs),
+			}},
+		}
 	}
 	deleteSubtree(ctx.Tree, node, ctx.Scope)
 	return &ToolResult{OK: true, Data: map[string]any{"deleted": a.ID}}
@@ -295,7 +325,27 @@ func execLinkNodes(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 		return toolError("", "节点不能链接到自身")
 	}
 	if !inScope(ctx, a.Parent) || !inScope(ctx, a.Child) {
-		return toolError("", "parent/child 均需在本次勾选的修改范围内")
+		var outOfScope []string
+		if !inScope(ctx, a.Parent) {
+			outOfScope = append(outOfScope, a.Parent)
+		}
+		if !inScope(ctx, a.Child) {
+			outOfScope = append(outOfScope, a.Child)
+		}
+		toolArgs, _ := json.Marshal(a)
+		return &ToolResult{
+			Paused: true,
+			Questions: []PauseQuestion{{
+				ID:        "scope-link-" + strings.Join(outOfScope, "-"),
+				Type:      "scope",
+				Question:  fmt.Sprintf("Agent 想连线 %s → %s，但节点 %s 不在你勾选的修改范围内。是否允许？", a.Parent, a.Child, strings.Join(outOfScope, ",")),
+				Options:   []string{"允许", "拒绝", "允许本次全部越界节点"},
+				NodeID:    strings.Join(outOfScope, ","),
+				NodeType:  "link",
+				Operation: toolLinkNodes,
+				ToolArgs:  string(toolArgs),
+			}},
+		}
 	}
 	if ctx.Tree.IsDescendant(a.Child, a.Parent) {
 		return toolError("", "连线会造成环路: %s 已是 %s 的后代", a.Parent, a.Child)

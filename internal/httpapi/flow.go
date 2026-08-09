@@ -295,6 +295,8 @@ func (s *Server) handleValidateDraft(c *gin.Context) {
 		writeErr(c, http.StatusBadRequest, "草稿解析失败")
 		return
 	}
+	// 清理旧版本恢复带入的无 source input（如 body），避免校验假阳性。
+	service.StripOrphanInputs(tree)
 	opts := flow.ValidatorOptions{
 		UnitDeleted: func(unitID uint) bool {
 			var u model.TestUnit

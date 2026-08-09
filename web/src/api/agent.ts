@@ -22,6 +22,11 @@ export interface PauseQuestion {
   type: string
   question: string
   options?: string[]
+  node_id?: string
+  node_type?: string
+  operation?: string
+  tool_args?: string
+  tool_call_id?: string
 }
 
 export interface PauseAnswer {
