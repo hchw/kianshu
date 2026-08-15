@@ -135,8 +135,22 @@ describe('linkAllowed', () => {
     expect(linkAllowed(t, 'n4', 'c2')).toEqual([])
   })
 
-  it('rejects a second parent', () => {
-    expect(linkAllowed(sampleTree(), 'n2', 'n4').some((e) => e.code === 'link.multi_parent')).toBe(true)
+  it('allows reparenting and removes the old parent', () => {
+    const t = sampleTree()
+    const errs = linkAllowed(t, 'n2', 'n4')
+    expect(errs).toEqual([])
+    // 模拟 UI 实际改父后，reconcileChildren 应从旧父摘除、挂到新父
+    t.nodes.n4.parent = 'n2'
+    reconcileChildren(t)
+    expect(t.nodes.n4.parent).toBe('n2')
+    expect(t.nodes.n3.children).not.toContain('n4')
+    expect(t.nodes.n2.children).toContain('n4')
+  })
+
+  it('rejects a link that would create a cycle', () => {
+    // n3 是 n4 的祖先；把 n4 连到 n3 会让 n3 成为自己的后代
+    const errs = linkAllowed(sampleTree(), 'n4', 'n3')
+    expect(errs.some((e) => e.code === 'tree.cycle')).toBe(true)
   })
 
   it('allows a valid new link', () => {

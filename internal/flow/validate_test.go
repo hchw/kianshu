@@ -116,6 +116,25 @@ func TestTreeShape(t *testing.T) {
 			t.Fatal("expected disconnected error")
 		}
 	})
+
+	t.Run("start as child rejected", func(t *testing.T) {
+		tree := helperTree(t, func(tree *Tree) {
+			tree.Start = "s"
+			add(tree, "s", NodeStart)
+			add(tree, "a", NodeAPI)
+			// start 被设为 a 的子节点
+			tree.Nodes["s"].Parent = "a"
+		})
+		found := false
+		for _, e := range tree.ValidateTreeShape() {
+			if e.Code == "tree.start_child" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("expected tree.start_child error")
+		}
+	})
 }
 
 func TestIOContract(t *testing.T) {

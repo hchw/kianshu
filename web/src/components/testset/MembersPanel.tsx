@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiError } from '../../api/client'
 import { addMember, listMembers, removeMember, searchUsers, type MemberView, type UserBrief } from '../../api/testset'
 import { ErrorNote } from '../feedback/ErrorNote'
+import PopConfirm from '../dialog/PopConfirm'
 
 interface Props {
   testSetID: number
@@ -91,9 +92,8 @@ export default function MembersPanel({ testSetID, ownerID }: Props) {
     }
   }
 
-  const remove = async (uid: number, name: string) => {
-    if (!confirm(`移除成员「${name}」?`)) return
-    try {
+  const remove = async (uid: number, _name: string) => {
+      try {
       await removeMember(testSetID, uid)
       setMembers((cur) => cur.filter((m) => m.user_id !== uid))
     } catch (e) {
@@ -198,9 +198,9 @@ export default function MembersPanel({ testSetID, ownerID }: Props) {
               </td>
               <td>{m.role}</td>
               <td>
-                <button className="link danger" onClick={() => remove(m.user_id, m.username)}>
-                  移除
-                </button>
+                <PopConfirm danger message={`移除成员「${m.username}」?`} onConfirm={() => remove(m.user_id, m.username)}>
+              <button className="link danger">移除</button>
+            </PopConfirm>
               </td>
             </tr>
           ))}
