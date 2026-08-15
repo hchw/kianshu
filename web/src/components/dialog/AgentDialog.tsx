@@ -8,6 +8,7 @@ import { openSSE } from '../../sse'
 import { NODE_LABELS, applyToolMutation } from '../../lib/tree'
 import { BusyButton } from '../feedback/BusyButton'
 import { ErrorNote } from '../feedback/ErrorNote'
+import PopConfirm from './PopConfirm'
 
 interface Props {
   flowID: number
@@ -347,7 +348,6 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
   }
 
   const newSession = async () => {
-    if (!confirm('清空当前会话历史?')) return
     try {
       await agentNew(flowID)
       await refreshSession()
@@ -359,7 +359,6 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
   }
 
   const compressSession = async () => {
-    if (!confirm('压缩会话历史将保留系统提示和操作摘要,去除冗余的工具调用记录以节省 token。继续?')) return
     try {
       await agentCompress(flowID)
       await refreshSession()
@@ -390,9 +389,9 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
           <option value="generate">生成</option>
           <option value="edit">编辑</option>
         </select>
-        <button className="link" onClick={newSession}>
-          新会话
-        </button>
+        <PopConfirm danger message="清空当前会话历史?" onConfirm={newSession}>
+                <button className="link">新会话</button>
+              </PopConfirm>
       </div>
       <div className="muted">限定节点范围</div>
       <div className="node-tags">
@@ -467,9 +466,9 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
         )}
       </div>
       <div className="row tight">
-        <button className="link" onClick={compressSession} disabled={busy}>
-          压缩对话
-        </button>
+        <PopConfirm danger message="压缩会话历史将保留系统提示和操作摘要,去除冗余的工具调用记录以节省 token。继续?" onConfirm={compressSession}>
+                <button className="link" disabled={busy}>压缩对话</button>
+              </PopConfirm>
       </div>
       {status === 'paused' && questions.length > 0 && (
         <div className="card sub">

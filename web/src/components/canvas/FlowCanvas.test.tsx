@@ -11,6 +11,10 @@ const h = vi.hoisted(() => {
   return { rfProps, fitView }
 })
 
+vi.mock('../../components/feedback/Toast', () => ({
+  useToast: () => ({ toast: vi.fn(), success: vi.fn(), error: vi.fn() }),
+}))
+
 vi.mock('@xyflow/react', () => ({
   ReactFlow: (props: any) => {
     h.rfProps.current = props
@@ -127,5 +131,83 @@ describe('FlowCanvas', () => {
     expect(call.nodes.n1.x).toBeUndefined()
     expect(call.nodes.n1.y).toBeUndefined()
     expect(h.fitView).toHaveBeenCalled()
+  })
+
+  it('onConnect reconciles children so the new edge renders immediately', () => {
+    const tree: FlowTree = {
+      start: 'n1',
+      nodes: {
+        n1: { id: 'n1', type: 'start', children: ['n2'] },
+        n2: { id: 'n2', type: 'api', parent: 'n1' },
+        n3: { id: 'n3', type: 'assert' },
+      },
+    }
+    const onTreeChange = vi.fn()
+    const onSaved = vi.fn()
+    render(
+      <FlowCanvas
+        tree={tree}
+        selected={null}
+        onSelect={vi.fn()}
+        onTreeChange={onTreeChange}
+        onSaved={onSaved}
+        onDelete={vi.fn()}
+        testSetID={1}
+        nodeResults={null}
+      />,
+    )
+    h.rfProps.current.onConnect({ source: 'n2', target: 'n3' })
+    const next = onTreeChange.mock.calls[0][0] as FlowTree
+    expect(next.nodes.n3.parent).toBe('n2')
+    expect(next.nodes.n2.children).toContain('n3')
+    expect(onSaved).toHaveBeenCalled()
+  })
+
+  it('onDrop onto a node makes the new node its child (落点即父)', () => {
+    const tree = sampleTree()
+    const onTreeChange = vi.fn()
+    const { container } = render(
+      <FlowCanvas
+        tree={tree}
+        selected={null}
+        onSelect={vi.fn()}
+        onTreeChange={onTreeChange}
+        onSaved={vi.fn()}
+        onDelete={vi.fn()}
+        testSetID={1}
+        nodeResults={null}
+      />,
+    )
+    const canvas = container.querySelector('.canvas')!
+    const nodeEl = document.createElement('div')
+    nodeEl.className = 'react-flow__node'
+    nodeEl.setAttribute('data-id', 'n2')
+    canvas.appendChild(nodeEl)
+    fireEvent.drop(nodeEl, { dataTransfer: { getData: () => 'api' } })
+    expect(onTreeChange).toHaveBeenCalledTimes(1)
+    const next = onTreeChange.mock.calls[0][0] as FlowTree
+    const newId = Object.keys(next.nodes).find((id) => id !== 'n1' && id !== 'n2' && id !== 'n3')!
+    expect(next.nodes[newId].parent).toBe('n2')
+    expect(next.nodes.n2.children).toContain(newId)
+  })
+
+  it('onDrop onto blank canvas creates no node (决策 A)', () => {
+    const tree = sampleTree()
+    const onTreeChange = vi.fn()
+    const { container } = render(
+      <FlowCanvas
+        tree={tree}
+        selected={null}
+        onSelect={vi.fn()}
+        onTreeChange={onTreeChange}
+        onSaved={vi.fn()}
+        onDelete={vi.fn()}
+        testSetID={1}
+        nodeResults={null}
+      />,
+    )
+    const canvas = container.querySelector('.canvas')!
+    fireEvent.drop(canvas, { dataTransfer: { getData: () => 'api' } })
+    expect(onTreeChange).not.toHaveBeenCalled()
   })
 })

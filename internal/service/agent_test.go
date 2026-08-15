@@ -118,6 +118,30 @@ func TestAgentToolsCreateAndLink(t *testing.T) {
 	}
 }
 
+func TestAgentToolsLinkStartRejected(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+	d, _ := GetDraft(gdb, flowID)
+	tree, _ := flow.ParseTree(d.Tree)
+
+	ctx := &ToolContext{DB: gdb, TestSetID: 1, Tree: tree}
+
+	// 先建一个普通节点 n2
+	res := ExecTool(ctx, toolCreateNode, json.RawMessage(`{"id":"n2","type":"api","parent":"n1","config":{"unit_id":1}}`))
+	if !res.OK {
+		t.Fatalf("create_node failed: %v", res.Error)
+	}
+
+	// 试图把 start(n1) 作为 n2 的子节点链接 → 应被拒绝
+	res = ExecTool(ctx, toolLinkNodes, json.RawMessage(`{"parent":"n2","child":"n1"}`))
+	if res.OK {
+		t.Fatalf("expected start-as-child link to be rejected, got OK")
+	}
+	if !strings.Contains(res.Error, "start 节点不可作为子节点") {
+		t.Fatalf("expected start-as-child error, got: %s", res.Error)
+	}
+}
+
 func TestAgentToolsScopeLimitsEdits(t *testing.T) {
 	gdb := agentTestDB(t)
 	flowID := createAgentFlow(t, gdb)

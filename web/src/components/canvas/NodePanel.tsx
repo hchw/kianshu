@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FlowTree, FlowNode, IOKey } from '../../api/flow'
 import { NODE_LABELS } from '../../lib/tree'
 import { getUnit, type TestUnit } from '../../api/testset'
+import PopConfirm from '../dialog/PopConfirm'
 
 interface Props {
   tree: FlowTree
@@ -299,14 +300,9 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
         <div>{renderConfig()}</div>
         <button className="primary" onClick={save}>保存</button>
         {node.type !== 'start' && (
-          <button
-            className="link danger"
-            onClick={() => {
-              if (confirm(`删除节点 ${nodeID} 及其全部子节点?`)) onDelete(nodeID)
-            }}
-          >
-            删除节点
-          </button>
+          <PopConfirm danger message={`删除节点 ${nodeID} 及其全部子节点?`} onConfirm={() => onDelete(nodeID)}>
+            <button className="link danger">删除节点</button>
+          </PopConfirm>
         )}
       </div>
     </div>

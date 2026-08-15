@@ -4,6 +4,7 @@ import { deleteUnit, listUnits, type TestUnit } from '../../api/testset'
 import { SkeletonList } from '../feedback/Skeleton'
 import { EmptyState } from '../feedback/EmptyState'
 import { ErrorNote } from '../feedback/ErrorNote'
+import PopConfirm from '../dialog/PopConfirm'
 
 interface Props {
   testSetID: number
@@ -44,8 +45,7 @@ export default function UnitsBrowser({ testSetID }: Props) {
   }, [load])
 
   const remove = async (u: TestUnit) => {
-    if (!confirm(`删除单元 ${u.slug}?`)) return
-    try {
+      try {
       await deleteUnit(testSetID, u.id)
       load()
     } catch (e) {
@@ -103,9 +103,9 @@ export default function UnitsBrowser({ testSetID }: Props) {
                   <td>{u.tag}</td>
                   <td>{u.name}</td>
                   <td>
-                    <button className="link danger" onClick={(e) => { e.stopPropagation(); remove(u) }}>
-                      删除
-                    </button>
+                    <PopConfirm danger message={`删除单元 ${u.slug}?`} onConfirm={() => remove(u)}>
+                <button className="link danger">删除</button>
+              </PopConfirm>
                   </td>
                 </tr>
                 {expanded.has(u.id) && (

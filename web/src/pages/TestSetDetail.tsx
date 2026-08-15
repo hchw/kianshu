@@ -18,6 +18,7 @@ import { PageSpinner } from '../components/feedback/PageSpinner'
 import { SkeletonList } from '../components/feedback/Skeleton'
 import { EmptyState } from '../components/feedback/EmptyState'
 import { ErrorNote } from '../components/feedback/ErrorNote'
+import PopConfirm from '../components/dialog/PopConfirm'
 import { useToast } from '../components/feedback/Toast'
 import { GitBranch } from 'lucide-react'
 
@@ -81,7 +82,6 @@ export default function TestSetDetail() {
   }
 
   const removeFlow = async (f: FlowSummary) => {
-    if (!confirm(`删除测试流「${f.name}」? 将一并删除其版本、运行记录与定时调度,不可恢复。`)) return
     try {
       await deleteFlow(f.id)
       toast.success('测试流已删除')
@@ -157,15 +157,13 @@ export default function TestSetDetail() {
                   <div key={f.id} className="card item" onClick={() => nav(`/flows/${f.id}`)}>
                     <span className="strong">{f.name}</span>
                     <span className="muted">打开编辑器 →</span>
-                    <button
-                      className="link danger"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        removeFlow(f)
-                      }}
+                    <PopConfirm
+                      danger
+                      message={`删除测试流「${f.name}」?\n将一并删除其版本、运行记录与定时调度,不可恢复。`}
+                      onConfirm={() => removeFlow(f)}
                     >
-                      删除
-                    </button>
+                      <button className="link danger">删除</button>
+                    </PopConfirm>
                   </div>
                 ))
               )}

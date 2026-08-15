@@ -14,6 +14,7 @@ import { SkeletonList } from '../components/feedback/Skeleton'
 import { EmptyState } from '../components/feedback/EmptyState'
 import { ErrorNote } from '../components/feedback/ErrorNote'
 import { useToast } from '../components/feedback/Toast'
+import PopConfirm from '../components/dialog/PopConfirm'
 import { Plug } from 'lucide-react'
 
 interface FormState {
@@ -103,7 +104,6 @@ export default function Providers() {
   }
 
   const remove = async (p: Provider) => {
-    if (!confirm(`删除 Provider "${p.name}"?`)) return
     setErr('')
     try {
       await deleteProvider(p.id)
@@ -202,9 +202,9 @@ export default function Providers() {
                 <button className="ghost" onClick={() => startEdit(p)}>
                   编辑
                 </button>
-                <button className="link danger" onClick={() => remove(p)}>
-                  删除
-                </button>
+                <PopConfirm danger message={`删除 Provider "${p.name}"?`} onConfirm={() => remove(p)}>
+                  <button className="link danger">删除</button>
+                </PopConfirm>
               </div>
             </div>
           ))

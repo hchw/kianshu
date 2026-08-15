@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
+import { useToast } from '../feedback/Toast'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -18,7 +19,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { FlowTree } from '../../api/flow'
-import { layoutTree, linkAllowed, NODE_LABELS } from '../../lib/tree'
+import { layoutTree, linkAllowed, reconcileChildren, NODE_LABELS } from '../../lib/tree'
 import { statusLabel } from '../results/ResultsPanel'
 import NodePanel from './NodePanel'
 
@@ -77,7 +78,7 @@ function KianshuNode(props: NodeProps) {
 
   return (
     <>
-      <Handle type="target" position={Position.Top} style={{ visibility: 'hidden' }} />
+      <Handle type="target" position={Position.Top} />
       {dotColor && nr && (
         <div
           ref={dotRef}
@@ -93,7 +94,7 @@ function KianshuNode(props: NodeProps) {
         />
       )}
       <div style={{ whiteSpace: 'pre-line', textAlign: 'center' }}>{label}</div>
-      <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
+      <Handle type="source" position={Position.Bottom} />
     </>
   )
 }
@@ -113,6 +114,7 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
       localStorage.setItem(PALETTE_KEY, o ? '0' : '1')
       return !o
     })
+  const toast = useToast()
   const draggingRef = useRef(false)
 
   // 节点状态点 popover
@@ -259,11 +261,12 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
   const onConnect = (conn: { source: string; target: string }) => {
     const errs = linkAllowed(tree, conn.source, conn.target)
     if (errs.length > 0) {
-      alert(`无法连接: ${errs.map((e) => e.message).join('; ')}`)
+      toast.error(`无法连接: ${errs.map((e) => e.message).join('; ')}`)
       return
     }
     const next: FlowTree = JSON.parse(JSON.stringify(tree))
     next.nodes[conn.target].parent = conn.source
+    reconcileChildren(next)
     onTreeChange(next)
     onSaved()
   }
@@ -272,15 +275,23 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
     ev.preventDefault()
     const type = ev.dataTransfer.getData('node-type')
     if (!type) return
+    // 路线 C：从落点 DOM 上溯 .react-flow__node 取 data-id 作父节点
+    const el = (ev.target as HTMLElement).closest('.react-flow__node')
+    const parentId = el?.getAttribute('data-id')
+    // 决策 A：落在空白（无命中节点）则不建节点，避免孤儿
+    if (!parentId || !tree.nodes[parentId]) return
     const id = `n${Date.now().toString(36)}`
     const next: FlowTree = JSON.parse(JSON.stringify(tree))
+    const config = type === 'catch' ? { fallback: {} } : {}
     next.nodes[id] = {
       id,
       type,
       inputs: {},
       outputs: {},
-      config: {},
+      config,
+      parent: parentId,
     }
+    reconcileChildren(next)
     onTreeChange(next)
     onSelect(id)
   }
@@ -332,7 +343,7 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
           )}
         </button>
         <div className="palette">
-          {['api', 'assert', 'loop', 'try', 'cache-set', 'adapter'].map((t) => (
+          {['api', 'assert', 'loop', 'try', 'cache-set', 'adapter', 'catch'].map((t) => (
             <div
               key={t}
               className="palette-item"

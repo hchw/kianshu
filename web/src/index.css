@@ -1439,6 +1439,78 @@ h3 {
 }
 
 /* ============================================================
+   按钮旁的小确认弹框（替代原生 confirm 霸屏白框）
+   ============================================================ */
+
+.popconfirm-anchor {
+  display: inline-flex;
+}
+
+.popconfirm {
+  position: fixed;
+  z-index: 80;
+  width: 260px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-3);
+  animation: popconfirm-in 120ms ease;
+}
+
+@keyframes popconfirm-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.popconfirm-body {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.popconfirm-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--danger);
+}
+
+.popconfirm-text {
+  min-width: 0;
+}
+
+.popconfirm-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.popconfirm-msg {
+  color: var(--text);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.popconfirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.popconfirm-actions button {
+  padding: 4px 12px;
+  font-size: var(--fs-12);
+}
+
+/* ============================================================
    下拉菜单
    ============================================================ */
 

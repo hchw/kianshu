@@ -129,6 +129,9 @@ func (t *Tree) ValidateTreeShape() []ValidationError {
 			continue
 		}
 		if id == t.Start {
+			if n.Parent != "" {
+				errs = append(errs, ValidationError{NodeID: id, Code: "tree.start_child", Message: "start 节点不可作为子节点"})
+			}
 			continue
 		}
 		if n.Parent == "" {

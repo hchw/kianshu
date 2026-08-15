@@ -324,6 +324,9 @@ func execLinkNodes(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 	if a.Parent == a.Child {
 		return toolError("", "节点不能链接到自身")
 	}
+	if a.Child == ctx.Tree.Start {
+		return toolError("", "start 节点不可作为子节点")
+	}
 	if !inScope(ctx, a.Parent) || !inScope(ctx, a.Child) {
 		var outOfScope []string
 		if !inScope(ctx, a.Parent) {

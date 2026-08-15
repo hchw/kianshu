@@ -170,8 +170,29 @@ export function validateTreeShape(tree: FlowTree): TreeError[] {
   return errs
 }
 
-// linkRules reports whether a parent-child link is structurally allowed:
-// no self link, cache-set never linked, no cycle, and every node has one parent.
+// isDescendant reports whether `id` is reachable from `ancestorId` by following
+// children (i.e. `id` lies in `ancestorId`'s subtree). Used for cycle
+// detection when linking: if the parent is already a descendant of the child,
+// making the child a child of the parent forms a loop. Mirrors the backend's
+// execLinkNodes `IsDescendant(a.Child, a.Parent)` check.
+export function isDescendant(tree: FlowTree, ancestorId: string, id: string): boolean {
+  const seen = new Set<string>()
+  const stack = [ancestorId]
+  while (stack.length) {
+    const cur = stack.pop()!
+    if (cur === id) return true
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    for (const c of tree.nodes[cur]?.children ?? []) stack.push(c)
+  }
+  return false
+}
+
+// linkAllowed reports whether a parent-child link is structurally allowed:
+// no self link, both nodes exist, the child is not the start root, and no
+// cycle. Reparenting (moving a node to a new parent) is allowed — setting the
+// new parent pointer and reconciling children automatically removes the node
+// from its old parent.
 export function linkAllowed(tree: FlowTree, parent: string, child: string): TreeError[] {
   const errs: TreeError[] = []
   if (!parent || !child || parent === child) {
@@ -183,15 +204,16 @@ export function linkAllowed(tree: FlowTree, parent: string, child: string): Tree
     errs.push({ code: 'link.missing', message: '节点不存在' })
     return errs
   }
-  if (nodes[child].parent && nodes[child].parent !== parent) {
-    errs.push({ code: 'link.multi_parent', message: '每个节点只能有一个父节点' })
+  // start 节点必须无父节点
+  if (child === tree.start) {
+    errs.push({ code: 'link.start_child', message: 'start 节点不可作为子节点' })
     return errs
   }
-  const candidate: FlowTree = JSON.parse(JSON.stringify(tree))
-  candidate.nodes[child].parent = parent
-  reconcileChildren(candidate)
-  for (const e of validateTreeShape(candidate)) {
-    if (e.code === 'tree.cycle') errs.push(e)
+  // 环路：parent 已是 child 的后代（child 是 parent 的祖先）则形成环，
+  // 与后端 execLinkNodes 的 IsDescendant(child, parent) 判断一致。
+  if (isDescendant(tree, child, parent)) {
+    errs.push({ code: 'tree.cycle', message: '连线会造成环路' })
+    return errs
   }
   return errs
 }
