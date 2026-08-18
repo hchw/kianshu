@@ -323,3 +323,81 @@ func mustJSON(t *testing.T, s string) string {
 	}
 	return string(b)
 }
+
+// TestDuplicateFlowAPI verifies the duplicate endpoint clones the current
+// draft, supports custom names, tolerates an empty body (default name), and
+// rejects read-only members.
+func TestDuplicateFlowAPI(t *testing.T) {
+	c := newClient(t)
+	c.registerAndLogin()
+	_, ts := c.do("POST", "/api/test-sets", `{"name":"dup-demo"}`, http.StatusCreated)
+	testSetID := uint(ts["id"].(float64))
+	_, fl := c.do("POST", fmt.Sprintf("/api/test-sets/%d/flows", testSetID), `{"name":"支付"}`, http.StatusCreated)
+	flowID := uint(fl["id"].(float64))
+	tree := `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`
+	c.do("PUT", fmt.Sprintf("/api/flow/flows/%d/draft", flowID),
+		fmt.Sprintf(`{"name":"支付","tree":%s}`, mustJSON(t, tree)), http.StatusOK)
+
+	// Default name derived when body is absent.
+	_, dup := c.do("POST", fmt.Sprintf("/api/flow/flows/%d/duplicate", flowID), "", http.StatusCreated)
+	dupID := uint(dup["id"].(float64))
+	if dup["name"] != "支付 副本" {
+		t.Fatalf("expected default name 支付 副本, got %v", dup["name"])
+	}
+	_, d := c.do("GET", fmt.Sprintf("/api/flow/flows/%d/draft", dupID), "", http.StatusOK)
+	if d["tree"] != tree {
+		t.Fatalf("duplicated draft tree mismatch: got %v", d["tree"])
+	}
+	if d["name"] != "支付 副本" {
+		t.Fatalf("duplicated draft name: got %v", d["name"])
+	}
+
+	// Custom name via body.
+	_, dup2 := c.do("POST", fmt.Sprintf("/api/flow/flows/%d/duplicate", flowID),
+		`{"name":"回归基线"}`, http.StatusCreated)
+	if dup2["name"] != "回归基线" {
+		t.Fatalf("expected custom name, got %v", dup2["name"])
+	}
+
+	// Missing source flow -> 404.
+	c.do("POST", "/api/flow/flows/9999/duplicate", "", http.StatusNotFound)
+
+	// Read-only member cannot duplicate.
+	c2 := &client{t: t, ts: c.ts}
+	readerID := c2.registerAndLoginAs("dupreader")
+	c.do("POST", fmt.Sprintf("/api/test-sets/%d/members", testSetID),
+		fmt.Sprintf(`{"user_id":%d,"role":"read"}`, readerID), http.StatusCreated)
+	c2.do("POST", fmt.Sprintf("/api/flow/flows/%d/duplicate", flowID), "", http.StatusForbidden)
+}
+
+// TestRenameFlowAPI verifies the rename endpoint keeps list and draft names in
+// sync, rejects empty names, and forbids read-only members.
+func TestRenameFlowAPI(t *testing.T) {
+	c := newClient(t)
+	c.registerAndLogin()
+	_, ts := c.do("POST", "/api/test-sets", `{"name":"rename-demo"}`, http.StatusCreated)
+	testSetID := uint(ts["id"].(float64))
+	_, fl := c.do("POST", fmt.Sprintf("/api/test-sets/%d/flows", testSetID), `{"name":"旧名"}`, http.StatusCreated)
+	flowID := uint(fl["id"].(float64))
+
+	_, renamed := c.do("PATCH", fmt.Sprintf("/api/flow/flows/%d", flowID), `{"name":"新名"}`, http.StatusOK)
+	if renamed["name"] != "新名" {
+		t.Fatalf("expected new name, got %v", renamed["name"])
+	}
+	// Draft name follows.
+	_, d := c.do("GET", fmt.Sprintf("/api/flow/flows/%d/draft", flowID), "", http.StatusOK)
+	if d["name"] != "新名" {
+		t.Fatalf("draft name should be synced, got %v", d["name"])
+	}
+
+	// Empty name -> 400.
+	c.do("PATCH", fmt.Sprintf("/api/flow/flows/%d", flowID), `{"name":"  "}`, http.StatusBadRequest)
+	c.do("PATCH", fmt.Sprintf("/api/flow/flows/%d", flowID), `{"name":""}`, http.StatusBadRequest)
+
+	// Read-only member cannot rename.
+	c2 := &client{t: t, ts: c.ts}
+	readerID := c2.registerAndLoginAs("renamereader")
+	c.do("POST", fmt.Sprintf("/api/test-sets/%d/members", testSetID),
+		fmt.Sprintf(`{"user_id":%d,"role":"read"}`, readerID), http.StatusCreated)
+	c2.do("PATCH", fmt.Sprintf("/api/flow/flows/%d", flowID), `{"name":"hack"}`, http.StatusForbidden)
+}

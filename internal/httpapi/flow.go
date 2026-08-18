@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github/hchw/kianshu/internal/flow"
 	"github/hchw/kianshu/internal/model"
@@ -170,6 +171,101 @@ func (s *Server) handleDeleteFlow(c *gin.Context) {
 		return
 	}
 	writeJSON(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+// handleDuplicateFlow duplicates a flow's current working draft into a new
+// flow within the same test set. name is optional: when empty the backend
+// derives `{原名} 副本`.
+//
+//	@Summary	复制测试流
+//	@Description	复制指定测试流的当前草稿为同测试集下的新流。名称可自定义,缺省时自动生成 `{原名} 副本`。仅复制工作状态,不复制版本、运行记录与定时调度。需要编辑权限。
+//	@Tags		测试流
+//	@Accept		json
+//	@Produce	json
+//	@Security	BearerAuth
+//	@Param		flowID	path	uint			true	"流 ID"
+//	@Param		body	body	duplicateFlowReq	true	"可选的新流名称"
+//	@Success	201	{object}	model.TestFlow	"复制产生的新测试流"
+//	@Failure	400	{object}	errorResp		"请求体不合法"
+//	@Failure	403	{object}	errorResp		"无编辑权限"
+//	@Failure	404	{object}	errorResp		"流不存在"
+//	@Failure	500	{object}	errorResp		"复制失败"
+//	@Router		/flow/flows/{flowID}/duplicate [post]
+func (s *Server) handleDuplicateFlow(c *gin.Context) {
+	flowID, uid, ok := s.flowEditable(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	// 请求体可选:允许空 body / 无 body(直接 curl 触发时后端兜底默认名)。
+	if c.Request.Body != nil && c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			writeErr(c, http.StatusBadRequest, "请求体不合法")
+			return
+		}
+	}
+	f, err := service.DuplicateFlow(s.DB, flowID, uid, req.Name)
+	if err != nil {
+		if errors.Is(err, service.ErrFlowNotFound) {
+			writeErr(c, http.StatusNotFound, "流不存在")
+			return
+		}
+		writeErr(c, http.StatusInternalServerError, "复制失败")
+		return
+	}
+	writeJSON(c, http.StatusCreated, f)
+}
+
+// handleRenameFlow renames a flow, keeping TestFlow.Name and FlowDraft.Name
+// in sync so the list and the editor title never diverge.
+//
+//	@Summary	重命名测试流
+//	@Description	重命名指定测试流,同步更新流记录与草稿记录中的名称,保证列表与编辑器标题一致。需要编辑权限。
+//	@Tags		测试流
+//	@Accept		json
+//	@Produce	json
+//	@Security	BearerAuth
+//	@Param		flowID	path	uint		true	"流 ID"
+//	@Param		body	body	renameFlowReq	true	"新名称"
+//	@Success	200	{object}	model.TestFlow	"更新后的测试流"
+//	@Failure	400	{object}	errorResp		"名称不能为空 / 名称过长 / 请求体不合法"
+//	@Failure	403	{object}	errorResp		"无编辑权限"
+//	@Failure	404	{object}	errorResp		"流不存在"
+//	@Failure	500	{object}	errorResp		"重命名失败"
+//	@Router		/flow/flows/{flowID} [patch]
+func (s *Server) handleRenameFlow(c *gin.Context) {
+	flowID, _, ok := s.flowEditable(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeErr(c, http.StatusBadRequest, "请求体不合法")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeErr(c, http.StatusBadRequest, "名称不能为空")
+		return
+	}
+	if utf8.RuneCountInString(name) > 128 {
+		writeErr(c, http.StatusBadRequest, "名称过长(最多 128 字符)")
+		return
+	}
+	f, err := service.RenameFlow(s.DB, flowID, name)
+	if err != nil {
+		if errors.Is(err, service.ErrFlowNotFound) {
+			writeErr(c, http.StatusNotFound, "流不存在")
+			return
+		}
+		writeErr(c, http.StatusInternalServerError, "重命名失败")
+		return
+	}
+	writeJSON(c, http.StatusOK, f)
 }
 
 // handleGetDraft returns a flow's working draft (editable tree snapshot).

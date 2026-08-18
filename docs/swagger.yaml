@@ -1,4 +1,3 @@
-basePath: /api
 definitions:
   flow.Level:
     enum:
@@ -145,6 +144,17 @@ definitions:
     required:
     - name
     type: object
+  httpapi.cronDescribeResp:
+    properties:
+      description:
+        type: string
+      next_runs:
+        items:
+          type: string
+        type: array
+      valid:
+        type: boolean
+    type: object
   httpapi.deletedResp:
     properties:
       deleted:
@@ -161,6 +171,12 @@ definitions:
         type: string
       tree:
         example: '{"root":{}}'
+        type: string
+    type: object
+  httpapi.duplicateFlowReq:
+    properties:
+      name:
+        example: 我的测试流 副本
         type: string
     type: object
   httpapi.errorResp:
@@ -214,6 +230,27 @@ definitions:
         type: string
       username:
         example: testuser
+        type: string
+    type: object
+  httpapi.memberListResp:
+    properties:
+      members:
+        items:
+          $ref: '#/definitions/httpapi.memberView'
+        type: array
+      owner:
+        $ref: '#/definitions/httpapi.memberView'
+    type: object
+  httpapi.memberView:
+    properties:
+      role:
+        example: edit
+        type: string
+      user_id:
+        example: 2
+        type: integer
+      username:
+        example: zhangsan
         type: string
     type: object
   httpapi.okResp:
@@ -288,6 +325,15 @@ definitions:
       username:
         example: testuser
         type: string
+    type: object
+  httpapi.renameFlowReq:
+    properties:
+      name:
+        example: 支付流程
+        minLength: 1
+        type: string
+    required:
+    - name
     type: object
   httpapi.runListResp:
     properties:
@@ -371,6 +417,22 @@ definitions:
       name:
         example: 新名称
         type: string
+    type: object
+  httpapi.userBrief:
+    properties:
+      id:
+        example: 2
+        type: integer
+      username:
+        example: zhangsan
+        type: string
+    type: object
+  httpapi.userSearchResp:
+    properties:
+      users:
+        items:
+          $ref: '#/definitions/httpapi.userBrief'
+        type: array
     type: object
   httpapi.versionListResp:
     properties:
@@ -620,21 +682,30 @@ definitions:
     properties:
       id:
         type: string
+      node_id:
+        type: string
+      node_type:
+        type: string
+      operation:
+        type: string
       options:
         items:
           type: string
         type: array
       question:
         type: string
+      tool_args:
+        description: JSON-encoded tool call args for replay
+        type: string
+      tool_call_id:
+        description: LLM tool call id for tool-result correlation
+        type: string
       type:
-        description: auth | sample | order | swagger
+        description: auth | sample | order | swagger | scope | limit
         type: string
     type: object
 info:
   contact: {}
-  description: 导入 Swagger/OpenAPI 文档生成测试单元；LLM 生成可编辑的树形测试流；支持试运行、不可变版本快照与定时调度。
-  title: 鉴枢 Kianshu API
-  version: "1.0"
 paths:
   /auth/login:
     post:
@@ -749,6 +820,83 @@ paths:
       summary: 删除测试流
       tags:
       - 测试流
+    patch:
+      consumes:
+      - application/json
+      description: 重命名指定测试流,同步更新流记录与草稿记录中的名称,保证列表与编辑器标题一致。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 新名称
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.renameFlowReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的测试流
+          schema:
+            $ref: '#/definitions/model.TestFlow'
+        "400":
+          description: 名称不能为空 / 名称过长 / 请求体不合法
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 流不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 重命名失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 重命名测试流
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/agent/compress:
+    post:
+      description: 压缩流的 LLM 会话历史,保留系统提示、操作摘要和最后一条用户消息,去除冗余的工具调用/结果以节省 token。需要编辑权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 压缩完成
+          schema:
+            $ref: '#/definitions/httpapi.agentNewResp'
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 压缩会话失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 压缩 Agent 会话历史
+      tags:
+      - LLM Agent
   /flow/flows/{flowID}/agent/new:
     post:
       description: 清空流的 LLM 会话历史,开启全新会话。需要编辑权限。
@@ -914,6 +1062,43 @@ paths:
       summary: 提交 LLM Agent 指令(生成/编辑)
       tags:
       - LLM Agent
+  /flow/flows/{flowID}/agent/subscribe:
+    get:
+      description: 当页面刷新后原 SSE 连接断开时，通过此端点重新接收正在运行的 Agent 事件。若无正在运行的任务则返回 404。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 从第几条事件开始（默认0）
+        in: query
+        name: since
+        type: integer
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE 事件流
+          schema:
+            type: string
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 当前没有正在运行的 Agent 任务
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 订阅 Agent 运行事件（断线重连）
+      tags:
+      - LLM Agent
   /flow/flows/{flowID}/draft:
     get:
       description: 返回流的可编辑草稿,tree 为整棵执行树快照(JSON 字符串)。需要读权限。
@@ -1054,14 +1239,67 @@ paths:
       summary: 校验流草稿
       tags:
       - 测试流
-  /flow/flows/{flowID}/runs:
-    get:
-      description: 返回流的全部执行日志记录。需要读权限。
+  /flow/flows/{flowID}/duplicate:
+    post:
+      consumes:
+      - application/json
+      description: 复制指定测试流的当前草稿为同测试集下的新流。名称可自定义,缺省时自动生成 `{原名} 副本`。仅复制工作状态,不复制版本、运行记录与定时调度。需要编辑权限。
       parameters:
       - description: 流 ID
         in: path
         name: flowID
         required: true
+        type: integer
+      - description: 可选的新流名称
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.duplicateFlowReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 复制产生的新测试流
+          schema:
+            $ref: '#/definitions/model.TestFlow'
+        "400":
+          description: 请求体不合法
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无编辑权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "404":
+          description: 流不存在
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 复制失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 复制测试流
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/runs:
+    get:
+      description: 返回流的执行日志记录,支持分页。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      - description: 页码(1开始,默认1)
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数(默认20,最大100)
+        in: query
+        name: page_size
         type: integer
       produces:
       - application/json
@@ -1127,6 +1365,35 @@ paths:
       security:
       - BearerAuth: []
       summary: 获取执行日志
+      tags:
+      - 测试流
+  /flow/flows/{flowID}/runs/subscribe:
+    get:
+      description: 以 SSE 实时推送流的执行日志。新日志产生时立即推送到客户端。需要读权限。
+      parameters:
+      - description: 流 ID
+        in: path
+        name: flowID
+        required: true
+        type: integer
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE 事件流
+          schema:
+            type: string
+        "400":
+          description: 无效的流 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权访问该流
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 订阅执行日志（实时推送）
       tags:
       - 测试流
   /flow/flows/{flowID}/schedules:
@@ -1908,6 +2175,34 @@ paths:
       tags:
       - 测试单元
   /test-sets/{id}/members:
+    get:
+      description: 获取测试集的所有者信息及所有成员(含用户名)。owner/edit/read 均可查看。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成员列表
+          schema:
+            $ref: '#/definitions/httpapi.memberListResp'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 成员列表
+      tags:
+      - 测试集
     post:
       consumes:
       - application/json
@@ -1980,6 +2275,40 @@ paths:
       security:
       - BearerAuth: []
       summary: 移除成员
+      tags:
+      - 测试集
+  /test-sets/{id}/members/search:
+    get:
+      description: 根据用户名前缀搜索用户,排除当前用户及已是成员的用户,最多返回 10 条。
+      parameters:
+      - description: 测试集 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 搜索关键词(用户名前缀)
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 搜索结果
+          schema:
+            $ref: '#/definitions/httpapi.userSearchResp'
+        "400":
+          description: 无效的 ID
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "403":
+          description: 无权限
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 搜索用户
       tags:
       - 测试集
   /test-sets/{id}/units:
@@ -2148,4 +2477,32 @@ paths:
       summary: 查询测试单元(工具精简版)
       tags:
       - 测试单元
+  /utils/cron/describe:
+    post:
+      consumes:
+      - application/json
+      description: 验证 cron 表达式并返回描述和未来 5 次执行时间。
+      parameters:
+      - description: cron 表达式
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.createScheduleReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 描述信息
+          schema:
+            $ref: '#/definitions/httpapi.cronDescribeResp'
+        "400":
+          description: 请求体无效
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 解析 cron 表达式
+      tags:
+      - 定时调度
 swagger: "2.0"

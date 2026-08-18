@@ -614,3 +614,152 @@ func TestDeleteFlow(t *testing.T) {
 		t.Fatalf("expected ErrFlowNotFound on second delete, got %v", err)
 	}
 }
+
+// TestDuplicateFlow verifies DuplicateFlow clones the current draft into a new
+// flow with derived or custom names, and rejects missing source flows.
+func TestDuplicateFlow(t *testing.T) {
+	gdb := testDB(t)
+	f, err := CreateFlow(gdb, 1, 1, "支付流程")
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	// 写入一棵非空树作为工作状态。
+	tree := `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`
+	if _, err := UpdateDraft(gdb, f.ID, "支付流程", tree); err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+
+	t.Run("default name derived", func(t *testing.T) {
+		dup, err := DuplicateFlow(gdb, f.ID, 2, "")
+		if err != nil {
+			t.Fatalf("duplicate: %v", err)
+		}
+		if dup.ID == f.ID {
+			t.Fatal("duplicated flow must have a new ID")
+		}
+		if dup.TestSetID != f.TestSetID {
+			t.Fatalf("test set: got %d want %d", dup.TestSetID, f.TestSetID)
+		}
+		if dup.Name != "支付流程 副本" {
+			t.Fatalf("name: got %q want %q", dup.Name, "支付流程 副本")
+		}
+		if dup.CreatedBy != 2 {
+			t.Fatalf("created_by: got %d want 2", dup.CreatedBy)
+		}
+		d, err := GetDraft(gdb, dup.ID)
+		if err != nil {
+			t.Fatalf("get duplicated draft: %v", err)
+		}
+		if d.Name != dup.Name {
+			t.Fatalf("draft name: got %q want %q", d.Name, dup.Name)
+		}
+		if d.Tree != tree {
+			t.Fatalf("draft tree: got %q want %q", d.Tree, tree)
+		}
+		// 复制必须独立:改新流草稿不影响原流。
+		if _, err := UpdateDraft(gdb, dup.ID, dup.Name, `{"start":"n2","nodes":{"n2":{"id":"n2","type":"start"}}}`); err != nil {
+			t.Fatalf("update dup draft: %v", err)
+		}
+		orig, err := GetDraft(gdb, f.ID)
+		if err != nil {
+			t.Fatalf("get original draft: %v", err)
+		}
+		if orig.Tree != tree {
+			t.Fatal("original draft must be unaffected by duplicate edits")
+		}
+	})
+
+	t.Run("custom name", func(t *testing.T) {
+		dup, err := DuplicateFlow(gdb, f.ID, 1, "回归基线")
+		if err != nil {
+			t.Fatalf("duplicate: %v", err)
+		}
+		if dup.Name != "回归基线" {
+			t.Fatalf("name: got %q want %q", dup.Name, "回归基线")
+		}
+	})
+
+	t.Run("missing flow", func(t *testing.T) {
+		if _, err := DuplicateFlow(gdb, 9999, 1, ""); !errors.Is(err, ErrFlowNotFound) {
+			t.Fatalf("expected ErrFlowNotFound, got %v", err)
+		}
+	})
+
+	t.Run("empty draft still copies", func(t *testing.T) {
+		f2, err := CreateFlow(gdb, 1, 1, "空流")
+		if err != nil {
+			t.Fatalf("create flow: %v", err)
+		}
+		if err := gdb.Where("flow_id = ?", f2.ID).Delete(&model.FlowDraft{}).Error; err != nil {
+			t.Fatalf("delete draft: %v", err)
+		}
+		dup, err := DuplicateFlow(gdb, f2.ID, 1, "")
+		if err != nil {
+			t.Fatalf("duplicate empty-draft flow: %v", err)
+		}
+		d, err := GetDraft(gdb, dup.ID)
+		if err != nil {
+			t.Fatalf("get draft: %v", err)
+		}
+		if d.Tree != "" {
+			t.Fatalf("expected empty tree, got %q", d.Tree)
+		}
+	})
+}
+
+// TestRenameFlow verifies renaming keeps TestFlow.Name and FlowDraft.Name in
+// sync, and tolerates a missing draft.
+func TestRenameFlow(t *testing.T) {
+	gdb := testDB(t)
+	f, err := CreateFlow(gdb, 1, 1, "旧名字")
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	renamed, err := RenameFlow(gdb, f.ID, "新名字")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if renamed.Name != "新名字" {
+		t.Fatalf("flow name: got %q want %q", renamed.Name, "新名字")
+	}
+	var flowRow model.TestFlow
+	if err := gdb.First(&flowRow, f.ID).Error; err != nil {
+		t.Fatalf("reload flow: %v", err)
+	}
+	if flowRow.Name != "新名字" {
+		t.Fatalf("persisted flow name: got %q", flowRow.Name)
+	}
+	d, err := GetDraft(gdb, f.ID)
+	if err != nil {
+		t.Fatalf("get draft: %v", err)
+	}
+	if d.Name != "新名字" {
+		t.Fatalf("draft name: got %q want %q", d.Name, "新名字")
+	}
+
+	t.Run("missing draft tolerated", func(t *testing.T) {
+		f2, err := CreateFlow(gdb, 1, 1, "无草稿")
+		if err != nil {
+			t.Fatalf("create flow: %v", err)
+		}
+		if err := gdb.Where("flow_id = ?", f2.ID).Delete(&model.FlowDraft{}).Error; err != nil {
+			t.Fatalf("delete draft: %v", err)
+		}
+		if _, err := RenameFlow(gdb, f2.ID, "改名成功"); err != nil {
+			t.Fatalf("rename without draft: %v", err)
+		}
+		var flowRow model.TestFlow
+		if err := gdb.First(&flowRow, f2.ID).Error; err != nil {
+			t.Fatalf("reload flow: %v", err)
+		}
+		if flowRow.Name != "改名成功" {
+			t.Fatalf("flow name: got %q", flowRow.Name)
+		}
+	})
+
+	t.Run("missing flow", func(t *testing.T) {
+		if _, err := RenameFlow(gdb, 9999, "x"); !errors.Is(err, ErrFlowNotFound) {
+			t.Fatalf("expected ErrFlowNotFound, got %v", err)
+		}
+	})
+}

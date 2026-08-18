@@ -79,6 +79,16 @@ export async function deleteFlow(flowID: number) {
   return data
 }
 
+export async function duplicateFlow(flowID: number, name: string) {
+  const { data } = await api.post(`/flow/flows/${flowID}/duplicate`, { name })
+  return data
+}
+
+export async function renameFlow(flowID: number, name: string) {
+  const { data } = await api.patch(`/flow/flows/${flowID}`, { name })
+  return data
+}
+
 export async function trialRun(flowID: number) {
   const { data } = await api.post(`/flow/flows/${flowID}/draft/trial-run`)
   return data

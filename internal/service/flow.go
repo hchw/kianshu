@@ -131,6 +131,65 @@ func DeleteFlow(db *gorm.DB, sched *ScheduleManager, flowID uint) error {
 	return nil
 }
 
+// DuplicateFlow 复制一个测试流及其当前草稿到同一测试集下的新流。
+// name 为空时自动生成为 `{原名} 副本`。复制只携带当前工作状态（草稿树），
+// 不复制版本快照、运行记录、定时调度与 Agent 会话。
+func DuplicateFlow(db *gorm.DB, flowID, userID uint, name string) (*model.TestFlow, error) {
+	var f model.TestFlow
+	if err := db.First(&f, flowID).Error; err != nil {
+		return nil, ErrFlowNotFound
+	}
+	newName := strings.TrimSpace(name)
+	if newName == "" {
+		newName = f.Name + " 副本"
+	}
+	var dup *model.TestFlow
+	err := db.Transaction(func(tx *gorm.DB) error {
+		nd := &model.TestFlow{TestSetID: f.TestSetID, Name: newName, CreatedBy: userID}
+		if err := tx.Create(nd).Error; err != nil {
+			return err
+		}
+		treeJSON := ""
+		var d model.FlowDraft
+		if err := tx.Where("flow_id = ?", flowID).Order("id").First(&d).Error; err == nil {
+			treeJSON = d.Tree
+		}
+		draft := &model.FlowDraft{FlowID: nd.ID, Name: newName, Tree: treeJSON}
+		if err := tx.Create(draft).Error; err != nil {
+			return err
+		}
+		dup = nd
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dup, nil
+}
+
+// RenameFlow 重命名测试流,同步更新流记录与草稿记录中的名称,
+// 保证列表展示与编辑器标题一致。draft 不存在时仅更新流记录。
+func RenameFlow(db *gorm.DB, flowID uint, name string) (*model.TestFlow, error) {
+	var f model.TestFlow
+	if err := db.First(&f, flowID).Error; err != nil {
+		return nil, ErrFlowNotFound
+	}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.TestFlow{}).Where("id = ?", flowID).Update("name", name).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.FlowDraft{}).Where("flow_id = ?", flowID).Update("name", name).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	f.Name = name
+	return &f, nil
+}
+
 // swaggerParam is one parameter entry parsed from a unit's Params JSON array
 // (OpenAPI 2.0 format).
 type swaggerParam struct {

@@ -1509,6 +1509,21 @@ h3 {
   padding: 4px 12px;
   font-size: var(--fs-12);
 }
+.popconfirm-input {
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: 6px 10px;
+  font-size: var(--fs-13);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-6);
+  background: var(--surface);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.popconfirm-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
 
 /* ============================================================
    下拉菜单

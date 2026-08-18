@@ -188,6 +188,126 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "重命名指定测试流,同步更新流记录与草稿记录中的名称,保证列表与编辑器标题一致。需要编辑权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "重命名测试流",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "新名称",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.renameFlowReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的测试流",
+                        "schema": {
+                            "$ref": "#/definitions/model.TestFlow"
+                        }
+                    },
+                    "400": {
+                        "description": "名称不能为空 / 名称过长 / 请求体不合法",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "流不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "重命名失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/agent/compress": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "压缩流的 LLM 会话历史,保留系统提示、操作摘要和最后一条用户消息,去除冗余的工具调用/结果以节省 token。需要编辑权限。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LLM Agent"
+                ],
+                "summary": "压缩 Agent 会话历史",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "压缩完成",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.agentNewResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "压缩会话失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
             }
         },
         "/flow/flows/{flowID}/agent/new": {
@@ -446,6 +566,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/flow/flows/{flowID}/agent/subscribe": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "当页面刷新后原 SSE 连接断开时，通过此端点重新接收正在运行的 Agent 事件。若无正在运行的任务则返回 404。需要读权限。",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "LLM Agent"
+                ],
+                "summary": "订阅 Agent 运行事件（断线重连）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "从第几条事件开始（默认0）",
+                        "name": "since",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE 事件流",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "当前没有正在运行的 Agent 任务",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
         "/flow/flows/{flowID}/draft": {
             "get": {
                 "security": [
@@ -664,6 +842,76 @@ const docTemplate = `{
                 }
             }
         },
+        "/flow/flows/{flowID}/duplicate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "复制指定测试流的当前草稿为同测试集下的新流。名称可自定义,缺省时自动生成 ` + "`" + `{原名} 副本` + "`" + `。仅复制工作状态,不复制版本、运行记录与定时调度。需要编辑权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "复制测试流",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "可选的新流名称",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.duplicateFlowReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "复制产生的新测试流",
+                        "schema": {
+                            "$ref": "#/definitions/model.TestFlow"
+                        }
+                    },
+                    "400": {
+                        "description": "请求体不合法",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "404": {
+                        "description": "流不存在",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "复制失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
         "/flow/flows/{flowID}/runs": {
             "get": {
                 "security": [
@@ -671,7 +919,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "返回流的全部执行日志记录。需要读权限。",
+                "description": "返回流的执行日志记录,支持分页。需要读权限。",
                 "produces": [
                     "application/json"
                 ],
@@ -686,6 +934,18 @@ const docTemplate = `{
                         "name": "flowID",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码(1开始,默认1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页条数(默认20,最大100)",
+                        "name": "page_size",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -709,6 +969,52 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "查询执行日志失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/flow/flows/{flowID}/runs/subscribe": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "以 SSE 实时推送流的执行日志。新日志产生时立即推送到客户端。需要读权限。",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "测试流"
+                ],
+                "summary": "订阅执行日志（实时推送）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "流 ID",
+                        "name": "flowID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE 事件流",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的流 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问该流",
                         "schema": {
                             "$ref": "#/definitions/httpapi.errorResp"
                         }
@@ -1995,6 +2301,50 @@ const docTemplate = `{
             }
         },
         "/test-sets/{id}/members": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "获取测试集的所有者信息及所有成员(含用户名)。owner/edit/read 均可查看。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试集"
+                ],
+                "summary": "成员列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成员列表",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.memberListResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权限",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
@@ -2051,6 +2401,59 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "服务端错误",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
+        "/test-sets/{id}/members/search": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "根据用户名前缀搜索用户,排除当前用户及已是成员的用户,最多返回 10 条。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "测试集"
+                ],
+                "summary": "搜索用户",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "测试集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索关键词(用户名前缀)",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "搜索结果",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.userSearchResp"
+                        }
+                    },
+                    "400": {
+                        "description": "无效的 ID",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "403": {
+                        "description": "无权限",
                         "schema": {
                             "$ref": "#/definitions/httpapi.errorResp"
                         }
@@ -2366,6 +2769,51 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/utils/cron/describe": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "验证 cron 表达式并返回描述和未来 5 次执行时间。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "定时调度"
+                ],
+                "summary": "解析 cron 表达式",
+                "parameters": [
+                    {
+                        "description": "cron 表达式",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.createScheduleReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "描述信息",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.cronDescribeResp"
+                        }
+                    },
+                    "400": {
+                        "description": "请求体无效",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -2578,6 +3026,23 @@ const docTemplate = `{
                 }
             }
         },
+        "httpapi.cronDescribeResp": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "next_runs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "valid": {
+                    "type": "boolean"
+                }
+            }
+        },
         "httpapi.deletedResp": {
             "type": "object",
             "properties": {
@@ -2601,6 +3066,15 @@ const docTemplate = `{
                 "tree": {
                     "type": "string",
                     "example": "{\"root\":{}}"
+                }
+            }
+        },
+        "httpapi.duplicateFlowReq": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "我的测试流 副本"
                 }
             }
         },
@@ -2679,6 +3153,37 @@ const docTemplate = `{
                 "username": {
                     "type": "string",
                     "example": "testuser"
+                }
+            }
+        },
+        "httpapi.memberListResp": {
+            "type": "object",
+            "properties": {
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.memberView"
+                    }
+                },
+                "owner": {
+                    "$ref": "#/definitions/httpapi.memberView"
+                }
+            }
+        },
+        "httpapi.memberView": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "example": "edit"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "username": {
+                    "type": "string",
+                    "example": "zhangsan"
                 }
             }
         },
@@ -2782,6 +3287,19 @@ const docTemplate = `{
                 "username": {
                     "type": "string",
                     "example": "testuser"
+                }
+            }
+        },
+        "httpapi.renameFlowReq": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "example": "支付流程"
                 }
             }
         },
@@ -2905,6 +3423,30 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "example": "新名称"
+                }
+            }
+        },
+        "httpapi.userBrief": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "username": {
+                    "type": "string",
+                    "example": "zhangsan"
+                }
+            }
+        },
+        "httpapi.userSearchResp": {
+            "type": "object",
+            "properties": {
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.userBrief"
+                    }
                 }
             }
         },
@@ -3265,6 +3807,15 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "node_id": {
+                    "type": "string"
+                },
+                "node_type": {
+                    "type": "string"
+                },
+                "operation": {
+                    "type": "string"
+                },
                 "options": {
                     "type": "array",
                     "items": {
@@ -3274,8 +3825,16 @@ const docTemplate = `{
                 "question": {
                     "type": "string"
                 },
+                "tool_args": {
+                    "description": "JSON-encoded tool call args for replay",
+                    "type": "string"
+                },
+                "tool_call_id": {
+                    "description": "LLM tool call id for tool-result correlation",
+                    "type": "string"
+                },
                 "type": {
-                    "description": "auth | sample | order | swagger",
+                    "description": "auth | sample | order | swagger | scope | limit",
                     "type": "string"
                 }
             }
@@ -3285,12 +3844,12 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
+	Version:          "",
 	Host:             "",
-	BasePath:         "/api",
+	BasePath:         "",
 	Schemes:          []string{},
-	Title:            "鉴枢 Kianshu API",
-	Description:      "导入 Swagger/OpenAPI 文档生成测试单元；LLM 生成可编辑的树形测试流；支持试运行、不可变版本快照与定时调度。",
+	Title:            "",
+	Description:      "",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
