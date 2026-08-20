@@ -2980,6 +2980,10 @@ const docTemplate = `{
                     "example": [
                         "[\"get-users-{id}\"]"
                     ]
+                },
+                "system_prompt": {
+                    "type": "string",
+                    "example": "本流对接 XX 云签名规范"
                 }
             }
         },
@@ -3236,6 +3240,11 @@ const docTemplate = `{
                     "type": "string",
                     "minLength": 1,
                     "example": "我的 OpenAI"
+                },
+                "strict_content": {
+                    "description": "StrictContent 为 true 时,client 把 null content 改为空串,兼容 ollama/vLLM。",
+                    "type": "boolean",
+                    "example": false
                 }
             }
         },
@@ -3274,6 +3283,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "example": "我的 OpenAI"
+                },
+                "strict_content": {
+                    "type": "boolean",
+                    "example": false
                 }
             }
         },
@@ -3519,6 +3532,9 @@ const docTemplate = `{
                     "type": "string",
                     "example": "我的测试流"
                 },
+                "system_prompt": {
+                    "type": "string"
+                },
                 "tree": {
                     "type": "string"
                 },
@@ -3583,6 +3599,9 @@ const docTemplate = `{
                 "id": {
                     "type": "integer",
                     "example": 1
+                },
+                "system_prompt": {
+                    "type": "string"
                 },
                 "tree": {
                     "type": "string"

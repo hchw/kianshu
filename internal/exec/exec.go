@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,12 +105,12 @@ func Run(ctx context.Context, t *flow.Tree, opts Options) (*RunResult, error) {
 		return nil, fmt.Errorf("缺少 start 根节点")
 	}
 	e := &engine{
-		tree:     t,
-		opts:     opts,
-		cache:    map[string]any{},
-		results:  map[string]*NodeResult{},
-		doneCatch:  map[string]bool{},
-		ctx:      ctx,
+		tree:      t,
+		opts:      opts,
+		cache:     map[string]any{},
+		results:   map[string]*NodeResult{},
+		doneCatch: map[string]bool{},
+		ctx:       ctx,
 	}
 	started := time.Now()
 	startOut, startErr := e.execute(start, nil)
@@ -133,14 +135,14 @@ func Run(ctx context.Context, t *flow.Tree, opts Options) (*RunResult, error) {
 }
 
 type engine struct {
-	tree        *flow.Tree
-	opts        Options
-	cache       map[string]any
-	results     map[string]*NodeResult
-	iterCtx     map[string]any
-	rootStatus  Status
-	doneCatch   map[string]bool
-	ctx         context.Context
+	tree       *flow.Tree
+	opts       Options
+	cache      map[string]any
+	results    map[string]*NodeResult
+	iterCtx    map[string]any
+	rootStatus Status
+	doneCatch  map[string]bool
+	ctx        context.Context
 }
 
 // contextErr returns a timeout error when the run context has expired.
@@ -472,27 +474,109 @@ func (e *engine) evalAssertion(a Assertion, input map[string]any) (bool, error) 
 	if !ok {
 		return false, nil
 	}
+	// 期望值先类型化解析（JSON 字面量/裸字符串），再做类型感知比较，
+	// 支持数字、布尔、严格 null、数组/对象深度相等，不再无脑 Sprintf 字符串化。
+	exp := normalizeExpected(a.Expected)
 	switch a.Operator {
 	case "eq", "==":
-		return fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", a.Expected), nil
+		return equals(actual, exp), nil
 	case "ne", "!=":
-		return fmt.Sprintf("%v", actual) != fmt.Sprintf("%v", a.Expected), nil
+		return !equals(actual, exp), nil
 	case "contains":
-		s, ok := actual.(string)
-		if !ok {
-			return false, nil
-		}
-		return strings.Contains(s, fmt.Sprintf("%v", a.Expected)), nil
+		return containsValue(actual, exp), nil
 	case "gt":
-		return gt(actual, a.Expected)
+		return gt(actual, exp)
 	case "lt":
-		return lt(actual, a.Expected)
+		return lt(actual, exp)
 	default:
 		return false, fmt.Errorf("不支持的断言运算符: %s", a.Operator)
 	}
 }
 
+// normalizeExpected 把断言期望字符串按 JSON 字面量解析成对应 Go 类型：
+// "200"→float64、"true"→bool、"null"→nil、"[1,2]"/"{...}"→复合类型、
+// "\"abc\""→显式字符串；解析失败（裸 token 如 abc）原样保留为字符串。
+// 非 string 的期望值（如程序化写入的 number/bool）直接透传。
+func normalizeExpected(v any) any {
+	s, ok := v.(string)
+	if !ok {
+		return v
+	}
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return s
+	}
+	var out any
+	if err := json.Unmarshal([]byte(t), &out); err == nil {
+		return out
+	}
+	return s
+}
+
+// equals 类型感知相等：以期望值声明的类型为锚——数字期望做数值归一比较
+// （actual 为数字或数字字符串）、字符串期望严格按字符串精确比较、布尔严格、
+// null 严格判空、数组/对象深度相等。
+func equals(a, b any) bool {
+	switch e := b.(type) {
+	case float64, float32, int, int64, json.Number:
+		if af, aok := numeric(a); aok {
+			if bf, bok := numeric(e); bok {
+				return af == bf
+			}
+		}
+		return false
+	case string:
+		as, ok := a.(string)
+		return ok && as == e
+	case bool:
+		ab, ok := a.(bool)
+		return ok && ab == e
+	default:
+		if e == nil {
+			return a == nil
+		}
+		return reflect.DeepEqual(a, e)
+	}
+}
+
+// numeric 把数字或可解析为数字的字符串归一成 float64。
+func numeric(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case float32:
+		return float64(t), true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case json.Number:
+		f, err := t.Float64()
+		return f, err == nil
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		return f, err == nil
+	}
+	return 0, false
+}
+
+// containsValue 支持字符串子串包含与数组元素包含（按类型感知相等）。
+func containsValue(actual, exp any) bool {
+	switch t := actual.(type) {
+	case string:
+		return strings.Contains(t, fmt.Sprintf("%v", exp))
+	case []any:
+		for _, el := range t {
+			if equals(el, exp) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // getByPath walks a dotted path into a nested map/array value.
+
 func getByPath(v any, path string) (any, bool) {
 	if path == "" {
 		return v, true
@@ -533,8 +617,8 @@ func getByPath(v any, path string) (any, bool) {
 // and put the literal value under the same key in the static map.
 func (e *engine) cacheSetOutput(n *flow.Node, input any) (any, error) {
 	var cfg struct {
-		Writes map[string]any            `json:"writes"`
-		Static map[string]interface{}    `json:"static,omitempty"`
+		Writes map[string]any         `json:"writes"`
+		Static map[string]interface{} `json:"static,omitempty"`
 	}
 	if err := flow.UnmarshalConfig(n, &cfg); err != nil {
 		return nil, err

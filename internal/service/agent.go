@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github/hchw/kianshu/internal/flow"
@@ -86,11 +87,11 @@ type AgentOptions struct {
 
 // AgentResult is the outcome of an agent submission.
 type AgentResult struct {
-	Rounds       int      `json:"rounds"`
-	LimitReached bool     `json:"limit_reached"`
-	Finished     bool     `json:"finished"`
-	Message      string   `json:"message,omitempty"`
-	Events       []Event  `json:"events"`
+	Rounds       int     `json:"rounds"`
+	LimitReached bool    `json:"limit_reached"`
+	Finished     bool    `json:"finished"`
+	Message      string  `json:"message,omitempty"`
+	Events       []Event `json:"events"`
 }
 
 // StreamingProvider is the optional streaming capability of a ChatProvider.
@@ -102,13 +103,32 @@ type StreamingProvider interface {
 }
 
 // newAgentCompletionRequest builds a chat request for agent rounds with deep
-// thinking (chain-of-thought) disabled.
-func newAgentCompletionRequest(model string, messages []openai.Message) openai.CompletionRequest {
-	return openai.CompletionRequest{
-		Model:    model,
+// thinking (chain-of-thought) disabled。provider 的 strict-content 设置
+// (ollama/vLLM) 通过 ForceContentString 生效。
+func newAgentCompletionRequest(provider openai.Provider, messages []openai.Message) openai.CompletionRequest {
+	req := openai.CompletionRequest{
+		Model:    provider.GetModel(),
 		Messages: messages,
 		Thinking: &openai.ThinkingConfig{Type: "disabled"},
 	}
+	if provider.GetStrictContent() {
+		req.ForceContentString = true
+	}
+	return req
+}
+
+// flowSystemPrompt builds the system message for one agent submission by
+// merging the global platform guidance with the flow-scoped system prompt
+// document (business context / signing rules supplied by the user). The doc is
+// read live from the draft at submission time; an empty doc keeps the message
+// identical to the global prompt alone.
+func flowSystemPrompt(mode Mode, doc string) string {
+	base := systemPrompt(mode)
+	doc = strings.TrimSpace(doc)
+	if doc == "" {
+		return base
+	}
+	return base + "\n\n【本流专属上下文(用户提供的业务文档/签名规则,优先级高于全局规则)】\n" + doc
 }
 
 // systemPrompt builds the base system message for the agent loop.
@@ -232,6 +252,8 @@ catch 的子节点在成功路径上会收到被保护节点的输出,
 
 每次修改后调用 validate_flow 校验；校验失败时根据返回的
 expected_format 修正(可插 adapter 转换参数、加 cache-set 存 token)。`
+	p += adapterExtGuide
+	p += adapterBuiltinGuide
 	if mode == ModeGenerate {
 		p += ` 分析阶段仅调用只读工具(list_units/filter_units/get_flow)
 做需求分析与冲突排查,确认无冲突后再开始创建节点——
@@ -263,7 +285,7 @@ func toolSchemas() []openai.Tool {
 			Function: openai.ToolFunction{
 				Name:        toolListUnits,
 				Description: "列出测试集的全部测试单元摘要(method/path/tag),供生成流时引用 unit_id",
-				Parameters: json.RawMessage(`{"type":"object","properties":{"tag":{"type":"string"},"name":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"tag":{"type":"string"},"name":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false}`),
 			},
 		},
 		{
@@ -271,7 +293,7 @@ func toolSchemas() []openai.Tool {
 			Function: openai.ToolFunction{
 				Name:        toolFilterUnits,
 				Description: "按 tag/name/path 筛选测试单元,返回匹配子集",
-				Parameters: json.RawMessage(`{"type":"object","properties":{"tag":{"type":"string"},"name":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"tag":{"type":"string"},"name":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false}`),
 			},
 		},
 		{
@@ -279,7 +301,7 @@ func toolSchemas() []openai.Tool {
 			Function: openai.ToolFunction{
 				Name:        toolGetFlow,
 				Description: "读取当前测试流的执行树(含节点 I/O 契约与配置)",
-				Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			},
 		},
 		{
@@ -287,7 +309,7 @@ func toolSchemas() []openai.Tool {
 			Function: openai.ToolFunction{
 				Name:        toolCreateNode,
 				Description: "创建节点。type: start|api|assert|loop|try|catch|cache-set|adapter。api 需带 unit_id,建议同时声明 inputs(参数键与类型)和 config.params(执行参数值键值对)。api 响应为信封 {\"status_code\":N,\"body\":...},cache-set 需连到数据来源的上游节点,config 的 writes 值:字符串走 JSONata 求值(如 body.token)、非字符串直接当字面量、固定字符串放 static 用 $static.xxx 引用,如 {\"writes\":{\"token\":\"body.token\",\"invalid\":\"$static.bad\"},\"static\":{\"bad\":\"fake_token\"}}。adapter 若接 api 信封需用 $.body.xxx 访问字段。assert 节点 config 形状为 {\"assertions\":[{\"field\":\"status_code|body.xxx\",\"op\":\"eq|ne|contains|gt|lt\",\"expected\":期望值}]}。loop 若接 api 信封,input 指向 body.xxx。",
-				Parameters: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"type":{"type":"string"},"parent":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id","type"],"additionalProperties":false}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"type":{"type":"string"},"parent":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id","type"],"additionalProperties":false}`),
 			},
 		},
 		{
@@ -295,7 +317,7 @@ func toolSchemas() []openai.Tool {
 			Function: openai.ToolFunction{
 				Name:        toolUpdateNode,
 				Description: "更新节点的 inputs/outputs 或 config。cache-set 的 config 格式:{ \"writes\": { \"<缓存key>\": <值> }, \"static\": { \"<key>\": <固定字符串> } },writes 值:字符串→JSONata 表达式求值,非字符串→字面量,字符串字面量用 static+$static.xxx。",
-				Parameters: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id"],"additionalProperties":false}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id"],"additionalProperties":false}`),
 			},
 		},
 		{
@@ -303,7 +325,7 @@ func toolSchemas() []openai.Tool {
 			Function: openai.ToolFunction{
 				Name:        toolDeleteNode,
 				Description: "删除节点及其子树",
-				Parameters: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}`),
 			},
 		},
 		{
@@ -311,7 +333,7 @@ func toolSchemas() []openai.Tool {
 			Function: openai.ToolFunction{
 				Name:        toolLinkNodes,
 				Description: "把 child 链接到 parent 之下(会先展示两端 I/O 契约)。",
-				Parameters: json.RawMessage(`{"type":"object","properties":{"parent":{"type":"string"},"child":{"type":"string"}},"required":["parent","child"],"additionalProperties":false}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"parent":{"type":"string"},"child":{"type":"string"}},"required":["parent","child"],"additionalProperties":false}`),
 			},
 		},
 		{
@@ -319,7 +341,7 @@ func toolSchemas() []openai.Tool {
 			Function: openai.ToolFunction{
 				Name:        toolValidate,
 				Description: "对当前执行树做整树校验,返回 errors/warnings(含 expected_format)",
-				Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			},
 		},
 	}
@@ -364,7 +386,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 	}
 
 	// Rebuild the message list for this submission: system + prior history + user.
-	req := newAgentCompletionRequest(opt.Provider.GetModel(), []openai.Message{{Role: "system", Content: strPtr(systemPrompt(opt.Mode))}})
+	req := newAgentCompletionRequest(opt.Provider, []openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(opt.Mode, d.SystemPrompt))}})
 	if len(opt.PresetMessages) > 0 {
 		req.Messages = append(req.Messages, opt.PresetMessages...)
 	} else {
@@ -485,7 +507,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 				Content:    strPtr(jsonString(result)),
 			})
 		}
-		}
+	}
 
 	if !res.Finished {
 		if ctx.Err() != nil {
@@ -513,7 +535,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 			if err := SnapshotAPINodes(db, tree); err != nil {
 				return nil, err
 			}
-			if _, err := UpdateDraft(db, flowID, d.Name, tree.String()); err != nil {
+			if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt); err != nil {
 				return nil, err
 			}
 			res.Message = "已达 50 轮工具调用上限,已暂停。你可以选择继续生成或停止。"
@@ -537,7 +559,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 	if err := SnapshotAPINodes(db, tree); err != nil {
 		return nil, err
 	}
-	if _, err := UpdateDraft(db, flowID, d.Name, tree.String()); err != nil {
+	if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt); err != nil {
 		return nil, err
 	}
 	return res, nil

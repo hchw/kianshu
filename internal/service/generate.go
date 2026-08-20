@@ -17,15 +17,15 @@ import (
 
 // PauseQuestion is one user-decision point surfaced during generation.
 type PauseQuestion struct {
-	ID        string   `json:"id"`
-	Type      string   `json:"type"` // auth | sample | order | swagger | scope | limit
-	Question  string   `json:"question"`
-	Options   []string `json:"options,omitempty"`
-	NodeID     string `json:"node_id,omitempty"`
-	NodeType   string `json:"node_type,omitempty"`
-	Operation  string `json:"operation,omitempty"`
-	ToolArgs   string `json:"tool_args,omitempty"`   // JSON-encoded tool call args for replay
-	ToolCallID string `json:"tool_call_id,omitempty"` // LLM tool call id for tool-result correlation
+	ID         string   `json:"id"`
+	Type       string   `json:"type"` // auth | sample | order | swagger | scope | limit
+	Question   string   `json:"question"`
+	Options    []string `json:"options,omitempty"`
+	NodeID     string   `json:"node_id,omitempty"`
+	NodeType   string   `json:"node_type,omitempty"`
+	Operation  string   `json:"operation,omitempty"`
+	ToolArgs   string   `json:"tool_args,omitempty"`    // JSON-encoded tool call args for replay
+	ToolCallID string   `json:"tool_call_id,omitempty"` // LLM tool call id for tool-result correlation
 }
 
 // PauseAnswer pairs a user's answer with the question it addresses. Mapping by
@@ -75,7 +75,7 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 		return nil, err
 	}
 	toolCtx := &ToolContext{DB: db, TestSetID: tsID, Tree: tree}
-	req := newAgentCompletionRequest(provider.GetModel(), append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...))
+	req := newAgentCompletionRequest(provider, append([]openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(ModeGenerate, d.SystemPrompt))}}, history...))
 	req.Tools = toolSchemas()
 	req.Messages = append(req.Messages, openai.Message{Role: "user", Content: strPtr(contextMsg)})
 
@@ -169,7 +169,7 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 	if err := SnapshotAPINodes(db, tree); err != nil {
 		return nil, err
 	}
-	if _, err := UpdateDraft(db, flowID, d.Name, tree.String()); err != nil {
+	if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt); err != nil {
 		return nil, err
 	}
 	return RunAgent(ctx, db, flowID, userID, AgentOptions{
@@ -239,7 +239,11 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 	}
 
 	// 原有的 generate 模式暂停恢复逻辑
-	req := newAgentCompletionRequest(provider.GetModel(), append([]openai.Message{{Role: "system", Content: strPtr(systemPrompt(ModeGenerate))}}, history...))
+	d, err := GetDraft(db, flowID)
+	if err != nil {
+		return nil, err
+	}
+	req := newAgentCompletionRequest(provider, append([]openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(ModeGenerate, d.SystemPrompt))}}, history...))
 	req.Tools = toolSchemas()
 
 	var lines []string

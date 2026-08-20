@@ -44,11 +44,11 @@ describe('NodePanel delete button', () => {
   it('shows the delete button for non-start nodes and confirms before deleting', () => {
     const onDelete = renderPanel('n2')
     const btn = screen.getByText('删除节点')
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    // 弹出自绘 PopConfirm（非原生 window.confirm）：未确认前不触发回调
     fireEvent.click(btn)
     expect(onDelete).not.toHaveBeenCalled()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    fireEvent.click(btn)
+    // 点击弹窗的确认按钮后才触发删除
+    fireEvent.click(screen.getByText('确定'))
     expect(onDelete).toHaveBeenCalledWith('n2')
   })
 })

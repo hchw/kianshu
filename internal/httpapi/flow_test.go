@@ -116,13 +116,16 @@ func TestFlowLifecycle(t *testing.T) {
 	// Create a test set and a flow inside it.
 	_, ts := c.do("POST", "/api/test-sets", `{"name":"demo"}`, http.StatusCreated)
 	testSetID := uint(ts["id"].(float64))
-	_, fl := c.do("POST", fmt.Sprintf("/api/test-sets/%d/flows", testSetID), `{"name":"my flow"}`, http.StatusCreated)
+	_, fl := c.do("POST", fmt.Sprintf("/api/test-sets/%d/flows", testSetID), `{"name":"my flow","system_prompt":"签名规则 v0"}`, http.StatusCreated)
 	flowID := uint(fl["id"].(float64))
 
 	// Read the initial draft.
 	_, draft := c.do("GET", fmt.Sprintf("/api/flow/flows/%d/draft", flowID), "", http.StatusOK)
 	if !strings.Contains(draft["tree"].(string), `"type":"start"`) {
 		t.Fatalf("initial draft should contain a start node, got %v", draft["tree"])
+	}
+	if draft["system_prompt"] != "签名规则 v0" {
+		t.Fatalf("create should persist system_prompt, got %v", draft["system_prompt"])
 	}
 
 	// Build a valid tree: start -> cache-set(writes authorization) -> api(reader).
@@ -132,8 +135,13 @@ func TestFlowLifecycle(t *testing.T) {
 	  "n2":{"id":"n2","type":"api","parent":"cs1","inputs":{"authorization":{"type":"primitive","source":"$cache.authorization"}},"outputs":{"data":{"type":"object"}},"config":{"unit_id":0}}
 	}}`
 	_, updated := c.do("PUT", fmt.Sprintf("/api/flow/flows/%d/draft", flowID),
-		fmt.Sprintf(`{"name":"my flow","tree":%s}`, mustJSON(t, tree)), http.StatusOK)
+		fmt.Sprintf(`{"name":"my flow","system_prompt":"签名规则 v1","tree":%s}`, mustJSON(t, tree)), http.StatusOK)
 	_ = updated
+	// 草稿 GET 返回最新文档；nil 字段（旧客户端）不覆盖已有文档。
+	_, draft2 := c.do("GET", fmt.Sprintf("/api/flow/flows/%d/draft", flowID), "", http.StatusOK)
+	if draft2["system_prompt"] != "签名规则 v1" {
+		t.Fatalf("draft GET should return system_prompt, got %v", draft2["system_prompt"])
+	}
 
 	// Validation should pass.
 	_, vres := c.do("POST", fmt.Sprintf("/api/flow/flows/%d/draft/validate", flowID), "", http.StatusOK)
@@ -152,6 +160,9 @@ func TestFlowLifecycle(t *testing.T) {
 		t.Fatalf("expected 1 version, got %d", len(list))
 	}
 	v1 := list[0].(map[string]any)
+	if v1["system_prompt"] != "签名规则 v1" {
+		t.Fatalf("version snapshot should carry system_prompt, got %v", v1["system_prompt"])
+	}
 	if v1["version_no"].(float64) != 1 {
 		t.Fatalf("expected version_no 1, got %v", v1["version_no"])
 	}

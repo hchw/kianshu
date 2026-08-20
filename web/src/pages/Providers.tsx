@@ -22,9 +22,10 @@ interface FormState {
   base_url: string
   api_key: string
   model: string
+  strict_content: boolean
 }
 
-const emptyForm: FormState = { name: '', base_url: '', api_key: '', model: '' }
+const emptyForm: FormState = { name: '', base_url: '', api_key: '', model: '', strict_content: false }
 
 interface TestResult {
   ok: boolean
@@ -59,7 +60,7 @@ export default function Providers() {
 
   const startEdit = (p: Provider) => {
     setEditing(p.id)
-    setForm({ name: p.name, base_url: p.base_url, api_key: '', model: p.model })
+    setForm({ name: p.name, base_url: p.base_url, api_key: '', model: p.model, strict_content: p.strict_content ?? false })
     setErr('')
   }
 
@@ -84,6 +85,7 @@ export default function Providers() {
         base_url: form.base_url.trim(),
         api_key: form.api_key,
         model: form.model.trim() || undefined,
+        strict_content: form.strict_content,
       }
       if (editing !== null) {
         await updateProvider(editing, req)
@@ -159,6 +161,14 @@ export default function Providers() {
             value={form.model}
             onChange={(e) => setForm({ ...form, model: e.target.value })}
           />
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={form.strict_content}
+              onChange={(e) => setForm({ ...form, strict_content: e.target.checked })}
+            />
+            严格 content(ollama/vLLM)
+          </label>
         </div>
         <div className="row">
           <BusyButton type="submit" className="primary" busy={busy}>

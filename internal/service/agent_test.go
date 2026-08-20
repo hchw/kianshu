@@ -27,9 +27,10 @@ type scriptedRound struct {
 	err       error
 }
 
-func (f *fakeProvider) GetBaseURL() string { return "http://fake.local" }
-func (f *fakeProvider) GetAPIKey() string  { return "sk-test" }
-func (f *fakeProvider) GetModel() string   { return f.model }
+func (f *fakeProvider) GetBaseURL() string     { return "http://fake.local" }
+func (f *fakeProvider) GetAPIKey() string      { return "sk-test" }
+func (f *fakeProvider) GetModel() string       { return f.model }
+func (f *fakeProvider) GetStrictContent() bool { return false }
 
 func (f *fakeProvider) ChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest) (*openai.CompletionResponse, error) {
 	f.visited = append(f.visited, req)
@@ -79,7 +80,7 @@ func createAgentFlow(t *testing.T, gdb *gorm.DB) uint {
 	if err := gdb.First(&set).Error; err != nil {
 		t.Fatalf("no set: %v", err)
 	}
-	f, err := CreateFlow(gdb, set.ID, 1, "agent flow")
+	f, err := CreateFlow(gdb, set.ID, 1, "agent flow", "")
 	if err != nil {
 		t.Fatalf("create flow: %v", err)
 	}
@@ -410,8 +411,8 @@ func TestGenerateFlowDetectsAuthConflictWithoutQLine(t *testing.T) {
 	tree := &flow.Tree{
 		Start: "n1",
 		Nodes: map[string]*flow.Node{
-			"n1":  flow.NewNode("n1", flow.NodeStart),
-			"n2":  flow.NewNode("n2", flow.NodeAPI),
+			"n1": flow.NewNode("n1", flow.NodeStart),
+			"n2": flow.NewNode("n2", flow.NodeAPI),
 		},
 	}
 	csCfg, err := flow.MarshalConfig(map[string]any{"writes": map[string]string{"token": "$.token"}})
@@ -438,8 +439,8 @@ func TestGenerateFlowDetectsAuthConflictWithoutQLine(t *testing.T) {
 
 	// The LLM says nothing about a conflict — the code check must still pause.
 	fake := &fakeProvider{
-		model:   "m",
-		script:  []scriptedRound{{content: strPtrS("开始生成")}},
+		model:  "m",
+		script: []scriptedRound{{content: strPtrS("开始生成")}},
 	}
 	res, err := GenerateFlow(context.Background(), gdb, flowID, 1, "生成订单流程", fake)
 	if err != nil {
@@ -609,8 +610,8 @@ func TestGenerateFlowStreamsAnalysis(t *testing.T) {
 	flowID := createAgentFlow(t, gdb)
 
 	fake := &streamingFakeProvider{fakeProvider: fakeProvider{
-		model:   "m",
-		script:  []scriptedRound{{content: strPtrS("Q: 认证方式冲突,请确认")}},
+		model:  "m",
+		script: []scriptedRound{{content: strPtrS("Q: 认证方式冲突,请确认")}},
 	}}
 	var events []Event
 	res, err := GenerateFlow(context.Background(), gdb, flowID, 1, "生成流程", fake, AgentHooks{Emit: func(ev Event) {
@@ -1064,5 +1065,122 @@ func TestRunAgentLimitPauseStop(t *testing.T) {
 	sess, _ := GetFlowSession(gdb, flowID, 1)
 	if sess.Status != model.SessionActive {
 		t.Fatalf("expected active session after stop, got %s", sess.Status)
+	}
+}
+
+// TestFlowSystemPrompt 验证流级文档组装规则：空文档与全局提示完全一致；
+// 非空文档在全局提示之后追加分隔标记块；标记块声明本流最高优先级。
+func TestFlowSystemPrompt(t *testing.T) {
+	base := systemPrompt(ModeEdit)
+	if got := flowSystemPrompt(ModeEdit, ""); got != base {
+		t.Fatal("empty doc should equal global prompt")
+	}
+	if got := flowSystemPrompt(ModeEdit, "   \n\t "); got != base {
+		t.Fatal("whitespace-only doc should equal global prompt")
+	}
+	doc := "签名规则：使用 HMAC-SHA256 对 canonical string 签名后 base64"
+	got := flowSystemPrompt(ModeGenerate, doc)
+	if !strings.HasPrefix(got, systemPrompt(ModeGenerate)) {
+		t.Fatal("global prompt must precede the doc block")
+	}
+	if !strings.Contains(got, "【本流专属上下文") {
+		t.Fatalf("doc block marker missing: %q", got)
+	}
+	if idx := strings.Index(got, doc); idx < len(systemPrompt(ModeGenerate)) {
+		t.Fatal("doc content must come after the global prompt")
+	}
+}
+
+// runAgentOnce 用 scripted fake 跑一轮 RunAgent（无工具调用即结束），返回首轮请求。
+func runAgentOnce(t *testing.T, gdb *gorm.DB, flowID uint, doc string, presets []openai.Message) openai.CompletionRequest {
+	t.Helper()
+	ptr := strPtrS("ok")
+	fake := &fakeProvider{model: "m", script: []scriptedRound{{content: ptr}}}
+	fake.visited = nil
+	_, err := RunAgent(context.Background(), gdb, flowID, 1, AgentOptions{
+		Provider:       fake,
+		Instruction:    "加个断言",
+		Mode:           ModeEdit,
+		PresetMessages: presets,
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if len(fake.visited) == 0 {
+		t.Fatal("provider never called")
+	}
+	return fake.visited[0]
+}
+
+// TestRunAgentInjectsSystemPrompt 验证提交时从草稿现读文档注入系统消息：
+// 普通提交、带 preset 消息的编辑模式，以及空文档三态。
+func TestRunAgentInjectsSystemPrompt(t *testing.T) {
+	gdb := agentTestDB(t)
+	flowID := createAgentFlow(t, gdb)
+	doc := "本流签名规则：canonical 字符串按时间戳-方法-路径排序后加签"
+	dp := doc
+	if _, err := UpdateDraft(gdb, flowID, "agent flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &dp); err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+
+	// 普通 edit 提交：系统消息含文档，且文档块在全局提示之后、用户消息之前。
+	req := runAgentOnce(t, gdb, flowID, "", nil)
+	sys := req.Messages[0]
+	if sys.Role != "system" || sys.Content == nil || !strings.Contains(*sys.Content, doc) {
+		t.Fatalf("system message missing flow doc; got %+v", sys)
+	}
+	if idx := strings.Index(*sys.Content, doc); idx < strings.Index(*sys.Content, "【本流专属上下文") {
+		t.Fatal("doc must appear inside the marked block")
+	}
+
+	// 带 preset 的路径：document 仍应出现（不被 preset 替换丢弃）。
+	bin := []openai.Message{{Role: "user", Content: strPtrS("preset user msg")}}
+	req2 := runAgentOnce(t, gdb, flowID, "", bin)
+	if !strings.Contains(*req2.Messages[0].Content, doc) {
+		t.Fatalf("preset path dropped the doc: %+v", req2.Messages[0])
+	}
+
+	// 清空文档后：系统消息与全局提示一致，无标记块。
+	empty := ""
+	if _, err := UpdateDraft(gdb, flowID, "agent flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &empty); err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+	req3 := runAgentOnce(t, gdb, flowID, "", nil)
+	if strings.Contains(*req3.Messages[0].Content, "【本流专属上下文") {
+		t.Fatal("empty doc must not inject the doc block")
+	}
+}
+
+// 5.3 提示词含能力清单、不含厂商配方模板（与 flow-context-doc 的边界）
+func TestSystemPromptAdapterGuide(t *testing.T) {
+	p := systemPrompt(ModeEdit)
+	// 章节存在且覆盖四块内容
+	for _, want := range []string{
+		"adapter 节点 JSONata 扩展能力",
+		"$hmacb64(secret, msg, algo)",
+		"$sortKeys(obj)",
+		"JSONata 内置函数库",
+		"function($v){ ... }",
+		"大小写敏感",
+		"$keys(obj)",
+		"$lookup(obj, 键)",
+		"$aesEncrypt(plain, key, iv, mode)",
+		"$rsaSign(msg, privPEM, algo)",
+		"什么时候用",
+		"易错点",
+		"原始字节",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("全局提示词缺少能力指引内容: %q", want)
+		}
+	}
+	// 边界：不得包含任何厂商专属配方模板（canonical string 模板/密钥前缀等）
+	for _, banned := range []string{
+		"x-aws-", "X-Sts-", "Authorization: AWS", "AKIA", "SecretId",
+		"X-Aliyun-", "X-Ke-Api", "X-TC-", "Oss-Access-Key", "华为云", "阿里云",
+	} {
+		if strings.Contains(p, banned) {
+			t.Errorf("全局提示词不应承载厂商配方内容: %q", banned)
+		}
 	}
 }

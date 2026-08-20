@@ -59,6 +59,10 @@ type CompletionRequest struct {
 	Messages []Message       `json:"messages"`
 	Tools    []Tool          `json:"tools,omitempty"`
 	Thinking *ThinkingConfig `json:"thinking,omitempty"`
+	// ForceContentString 让 client 把 content 为 null 的消息改为空串发出,
+	// 而非省略该字段。OpenAI 官方接受 null;ollama/vLLM 等严格服务端拒绝 null。
+	// 这是 client 端的指令,不会作为请求字段发给 provider。
+	ForceContentString bool `json:"-"`
 	// Stream asks the provider to send the response as an SSE delta stream
 	// (handled by StreamChatCompletion; ignored by ChatCompletion).
 	Stream bool `json:"stream,omitempty"`
@@ -79,6 +83,9 @@ type Provider interface {
 	GetBaseURL() string
 	GetAPIKey() string
 	GetModel() string
+	// GetStrictContent 报告该 provider 是否拒绝 null content(ollama/vLLM 等),
+	// 需要 client 在发送时把 null content 替换为空串。
+	GetStrictContent() bool
 }
 
 // Client calls an OpenAI-compatible endpoint.
@@ -91,8 +98,28 @@ func New() *Client {
 	return &Client{HTTP: &http.Client{Timeout: 60 * time.Second}}
 }
 
+// applyContentFallback 返回消息副本:当 ForceContentString 开启时,把任何
+// content 为 nil 的消息替换为空串。部分严格的 OpenAI 兼容服务端(ollama/vLLM/
+// SGLang)拒绝 null content 而要求字符串;官方 OpenAI 容忍 null。默认关闭时
+// 原样返回,保持对 OpenAI 的兼容。
+func (r CompletionRequest) applyContentFallback() []Message {
+	if !r.ForceContentString {
+		return r.Messages
+	}
+	out := make([]Message, len(r.Messages))
+	for i, m := range r.Messages {
+		if m.Content == nil {
+			s := ""
+			m.Content = &s
+		}
+		out[i] = m
+	}
+	return out
+}
+
 // ChatCompletion sends a chat completion request to the provider.
 func (c *Client) ChatCompletion(ctx context.Context, p Provider, req CompletionRequest) (*CompletionResponse, error) {
+	req.Messages = req.applyContentFallback()
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -158,6 +185,7 @@ type streamChunk struct {
 // the final message, so callers treat it exactly like ChatCompletion.
 func (c *Client) StreamChatCompletion(ctx context.Context, p Provider, req CompletionRequest, onChunk StreamCallback) (*CompletionResponse, error) {
 	req.Stream = true
+	req.Messages = req.applyContentFallback()
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, err

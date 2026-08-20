@@ -110,6 +110,9 @@ definitions:
         items:
           type: string
         type: array
+      system_prompt:
+        example: 本流对接 XX 云签名规范
+        type: string
     required:
     - instruction
     - provider_id
@@ -286,6 +289,10 @@ definitions:
         example: 我的 OpenAI
         minLength: 1
         type: string
+      strict_content:
+        description: StrictContent 为 true 时,client 把 null content 改为空串,兼容 ollama/vLLM。
+        example: false
+        type: boolean
     required:
     - base_url
     - name
@@ -316,6 +323,9 @@ definitions:
       name:
         example: 我的 OpenAI
         type: string
+      strict_content:
+        example: false
+        type: boolean
     type: object
   httpapi.registerResp:
     properties:
@@ -482,6 +492,8 @@ definitions:
       name:
         example: 我的测试流
         type: string
+      system_prompt:
+        type: string
       tree:
         type: string
       updated_at:
@@ -528,6 +540,8 @@ definitions:
       id:
         example: 1
         type: integer
+      system_prompt:
+        type: string
       tree:
         type: string
       version_no:

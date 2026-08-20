@@ -30,6 +30,7 @@ export interface Draft {
   test_set_id: number
   name: string
   tree: string
+  system_prompt: string
 }
 
 export interface FlowVersion {
@@ -37,6 +38,7 @@ export interface FlowVersion {
   flow_id: number
   version_no: number
   tree: string
+  system_prompt: string
   enabled: boolean
   created_by: number
   created_at: string
@@ -61,10 +63,11 @@ export async function getDraft(flowID: number) {
   return data
 }
 
-export async function updateDraft(flowID: number, name: string, tree: FlowTree) {
+export async function updateDraft(flowID: number, name: string, tree: FlowTree, systemPrompt?: string) {
   const { data } = await api.put<Draft>(`/flow/flows/${flowID}/draft`, {
     name,
     tree,
+    system_prompt: systemPrompt,
   })
   return data
 }

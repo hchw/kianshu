@@ -14,6 +14,8 @@ type providerReq struct {
 	BaseURL string `json:"base_url" validate:"required" minLength:"1" format:"uri" example:"https://api.openai.com"`
 	APIKey  string `json:"api_key" example:"sk-xxx"`
 	Model   string `json:"model" example:"gpt-4"`
+	// StrictContent 为 true 时,client 把 null content 改为空串,兼容 ollama/vLLM。
+	StrictContent bool `json:"strict_content" example:"false"`
 	Enabled *bool  `json:"enabled" example:"true"`
 }
 
@@ -23,11 +25,12 @@ type providerView struct {
 	Name    string `json:"name" example:"我的 OpenAI"`
 	BaseURL string `json:"base_url" example:"https://api.openai.com"`
 	Model   string `json:"model" example:"gpt-4"`
+	StrictContent bool   `json:"strict_content" example:"false"`
 	Enabled bool   `json:"enabled" example:"true"`
 }
 
 func toView(p model.Provider) providerView {
-	return providerView{p.ID, p.Name, p.BaseURL, p.Model, p.Enabled}
+	return providerView{p.ID, p.Name, p.BaseURL, p.Model, p.StrictContent, p.Enabled}
 }
 
 // handleListProviders lists the caller's LLM providers (API keys stripped).
@@ -80,8 +83,9 @@ func (s *Server) handleCreateProvider(c *gin.Context) {
 		Name:      req.Name,
 		BaseURL:   req.BaseURL,
 		APIKeyEnc: enc,
-		Model:     req.Model,
-		Enabled:   true,
+		Model:         req.Model,
+		StrictContent: req.StrictContent,
+		Enabled:       true,
 	}
 	if req.Enabled != nil {
 		p.Enabled = *req.Enabled
@@ -169,6 +173,7 @@ func (s *Server) handleUpdateProvider(c *gin.Context) {
 	if req.Model != "" {
 		p.Model = req.Model
 	}
+	p.StrictContent = req.StrictContent
 	if req.Enabled != nil {
 		p.Enabled = *req.Enabled
 	}
@@ -207,14 +212,16 @@ func (s *Server) handleDeleteProvider(c *gin.Context) {
 }
 
 type providerAdapter struct {
-	baseURL string
-	apiKey  string
-	model   string
+	baseURL       string
+	apiKey        string
+	model         string
+	strictContent bool
 }
 
-func (p *providerAdapter) GetBaseURL() string { return p.baseURL }
-func (p *providerAdapter) GetAPIKey() string  { return p.apiKey }
-func (p *providerAdapter) GetModel() string   { return p.model }
+func (p *providerAdapter) GetBaseURL() string     { return p.baseURL }
+func (p *providerAdapter) GetAPIKey() string      { return p.apiKey }
+func (p *providerAdapter) GetModel() string       { return p.model }
+func (p *providerAdapter) GetStrictContent() bool { return p.strictContent }
 
 // handleTestProvider verifies connectivity to an LLM provider.
 //
@@ -246,7 +253,7 @@ func (s *Server) handleTestProvider(c *gin.Context) {
 		writeErr(c, http.StatusInternalServerError, "密钥解密失败")
 		return
 	}
-	adapter := &providerAdapter{p.BaseURL, key, p.Model}
+	adapter := &providerAdapter{p.BaseURL, key, p.Model, p.StrictContent}
 	if err := s.LLM.Test(context.Background(), adapter); err != nil {
 		writeJSON(c, http.StatusOK, gin.H{"ok": false, "error": err.Error()})
 		return

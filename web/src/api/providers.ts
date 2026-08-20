@@ -6,6 +6,7 @@ export interface Provider {
   base_url: string
   model: string
   enabled: boolean
+  strict_content?: boolean
 }
 
 export interface ProviderReq {
@@ -14,6 +15,7 @@ export interface ProviderReq {
   api_key?: string
   model?: string
   enabled?: boolean
+  strict_content?: boolean
 }
 
 export async function listProviders() {

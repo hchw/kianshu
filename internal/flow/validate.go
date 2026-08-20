@@ -57,6 +57,7 @@ func Validate(t *Tree, opts ValidatorOptions) Result {
 	}
 	res.Errors = append(res.Errors, t.validateIOContracts()...)
 	res.Errors = append(res.Errors, t.validateAdapters()...)
+	res.Warnings = append(res.Warnings, t.validateAdapterFuncs()...)
 	res.Errors = append(res.Errors, t.validateTryCatch()...)
 	res.Errors = append(res.Errors, t.validateLoops()...)
 	res.Warnings = append(res.Warnings, t.validateSoftDeletedUnits(opts)...)
@@ -199,6 +200,38 @@ func (t *Tree) validateAdapters() []ValidationError {
 		}
 	}
 	return errs
+}
+
+// validateAdapterFuncs 词法扫描 adapter 表达式的函数调用并报告未知函数
+// （warning 级，不阻断流程——运行时本就会报 ErrNonCallable，静态层提前提示）。
+func (t *Tree) validateAdapterFuncs() []ValidationError {
+	var warns []ValidationError
+	for id, n := range t.Nodes {
+		if n == nil || n.Type != NodeAdapter {
+			continue
+		}
+		var cfg struct {
+			Expr string `json:"expr"`
+		}
+		// 配置解析失败或语法错误的表达式由 validateAdapters 报 error，
+		// 这里仅对可解析表达式做函数存在性检查。
+		if err := UnmarshalConfig(n, &cfg); err != nil {
+			continue
+		}
+		if jsonata.Parse(cfg.Expr) != nil {
+			continue
+		}
+		for _, name := range UnknownFuncFindings(cfg.Expr) {
+			warns = append(warns, ValidationError{
+				NodeID: id,
+				Code:   "adapter.unknown_func",
+				Level:  LevelWarning,
+				Message: fmt.Sprintf("JSONata 表达式引用了未知函数 $%s（不在内置或扩展函数集合内），运行时将报不可调用错误;可用函数: %s",
+					name, strings.Join(availableFuncNames(), ", ")),
+			})
+		}
+	}
+	return warns
 }
 
 // validateTryCatch checks catch placement per-branch: a catch must lie inside

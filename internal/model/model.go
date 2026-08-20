@@ -67,6 +67,9 @@ type Provider struct {
 	APIKeyEnc string    `gorm:"size:1024" json:"-"`
 	Model     string    `gorm:"size:128" json:"model" example:"gpt-4"`
 	Enabled   bool      `json:"enabled" example:"true"`
+	// StrictContent 为 true 时,client 会把 content 为 null 的消息改成空串发出,
+	// 兼容 ollama/vLLM 等拒绝 null content 的严格 OpenAI 兼容服务端。
+	StrictContent bool `gorm:"default:false" json:"strict_content" example:"false"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -103,25 +106,31 @@ type TestFlow struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// FlowDraft is the editable working state of a flow: a whole-tree JSON snapshot.
+// FlowDraft is the editable working state of a flow: a whole-tree JSON snapshot
+// plus the flow-scoped system prompt document (business context/signing rules
+// supplied by the user, injected into the agent system message per submission).
 type FlowDraft struct {
-	ID        uint      `gorm:"primarykey" json:"id" example:"1"`
-	FlowID    uint      `gorm:"index;not null" json:"flow_id" example:"1"`
-	Name      string    `gorm:"size:128" json:"name" example:"我的测试流"`
-	Tree      string    `gorm:"type:text" json:"tree"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           uint      `gorm:"primarykey" json:"id" example:"1"`
+	FlowID       uint      `gorm:"index;not null" json:"flow_id" example:"1"`
+	Name         string    `gorm:"size:128" json:"name" example:"我的测试流"`
+	Tree         string    `gorm:"type:text" json:"tree"`
+	SystemPrompt string    `gorm:"type:text" json:"system_prompt"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// FlowVersion is an immutable self-contained snapshot of the whole tree.
+// FlowVersion is an immutable self-contained snapshot of the whole tree; the
+// Flow-scoped system prompt document is snapshotted alongside so a restored
+// flow regenerates under the same business context.
 type FlowVersion struct {
-	ID        uint      `gorm:"primarykey" json:"id" example:"1"`
-	FlowID    uint      `gorm:"index;not null" json:"flow_id" example:"1"`
-	VersionNo int       `gorm:"not null" json:"version_no" example:"1"`
-	Tree      string    `gorm:"type:text" json:"tree"`
-	Enabled   bool      `gorm:"index" json:"enabled" example:"true"`
-	CreatedBy uint      `json:"created_by" example:"1"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           uint      `gorm:"primarykey" json:"id" example:"1"`
+	FlowID       uint      `gorm:"index;not null" json:"flow_id" example:"1"`
+	VersionNo    int       `gorm:"not null" json:"version_no" example:"1"`
+	Tree         string    `gorm:"type:text" json:"tree"`
+	SystemPrompt string    `gorm:"type:text" json:"system_prompt"`
+	Enabled      bool      `gorm:"index" json:"enabled" example:"true"`
+	CreatedBy    uint      `json:"created_by" example:"1"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // SessionStatus enumerates the states of an agent dialog session.

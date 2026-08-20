@@ -74,13 +74,18 @@ func (s *Server) handleCreateFlow(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Name string `json:"name"`
+		Name         string  `json:"name"`
+		SystemPrompt *string `json:"system_prompt"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
 		writeErr(c, http.StatusBadRequest, "名称不能为空")
 		return
 	}
-	f, err := service.CreateFlow(s.DB, testSetID, uid, req.Name)
+	var systemPrompt string
+	if req.SystemPrompt != nil {
+		systemPrompt = *req.SystemPrompt
+	}
+	f, err := service.CreateFlow(s.DB, testSetID, uid, req.Name, systemPrompt)
 	if err != nil {
 		writeErr(c, http.StatusInternalServerError, "创建失败")
 		return
@@ -292,7 +297,7 @@ func (s *Server) handleGetDraft(c *gin.Context) {
 		writeErr(c, http.StatusNotFound, "草稿不存在")
 		return
 	}
-	writeJSON(c, http.StatusOK, gin.H{"flow_id": flowID, "test_set_id": ts, "name": d.Name, "tree": d.Tree})
+	writeJSON(c, http.StatusOK, gin.H{"flow_id": flowID, "test_set_id": ts, "name": d.Name, "tree": d.Tree, "system_prompt": d.SystemPrompt})
 }
 
 // handleUpdateDraft saves a flow's working draft. Each save creates a new
@@ -317,8 +322,9 @@ func (s *Server) handleUpdateDraft(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Name string          `json:"name"`
-		Tree json.RawMessage `json:"tree"`
+		Name         string          `json:"name"`
+		Tree         json.RawMessage `json:"tree"`
+		SystemPrompt *string         `json:"system_prompt"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.Tree) == 0 {
 		writeErr(c, http.StatusBadRequest, "请求体需包含 tree")
@@ -329,7 +335,7 @@ func (s *Server) handleUpdateDraft(c *gin.Context) {
 		writeErr(c, http.StatusBadRequest, "tree 格式不合法")
 		return
 	}
-	d, err := service.UpdateDraft(s.DB, flowID, req.Name, treeJSON)
+	d, err := service.UpdateDraft(s.DB, flowID, req.Name, treeJSON, req.SystemPrompt)
 	if err != nil {
 		if errors.Is(err, service.ErrFlowValidation) {
 			writeErr(c, http.StatusBadRequest, err.Error())

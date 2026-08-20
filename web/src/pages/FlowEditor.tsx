@@ -17,6 +17,8 @@ import {
   type FlowVersion,
 } from '../api/flow'
 import { listProviders, type Provider } from '../api/providers'
+import { listMembers } from '../api/testset'
+import { currentUser } from '../store/session'
 import { parseNodeResults } from '../components/results/ResultsPanel'
 import type { NodeRunStatus } from '../components/canvas/FlowCanvas'
 import { parseTree, validateTreeShape, deleteNode } from '../lib/tree'
@@ -47,6 +49,12 @@ export default function FlowEditor() {
   const [runsPage, setRunsPage] = useState(1)
   const runsPageSize = 20
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  // 流级系统提示词文档：随草稿保存，Agent 提交时由后端实时注入系统消息。
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [promptOpen, setPromptOpen] = useState(() => localStorage.getItem('kianshu_prompt_open') !== '0')
+  const [promptPreview, setPromptPreview] = useState(false)
+  const [canEdit, setCanEdit] = useState(true)
+  const MAX_DOC_LEN = 8192
   const [sideOpen, setSideOpen] = useState(() => localStorage.getItem('kianshu_side_open') !== '0')
   const toggleSide = () =>
     setSideOpen((o) => {
@@ -56,6 +64,18 @@ export default function FlowEditor() {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [lastNodeResults, setLastNodeResults] = useState<Record<string, NodeRunStatus> | null>(null)
+
+  // 流系统提示词离开输入框即自动持久化（轻量只写文档列），避免编辑后未点
+  // "保存草稿"就离开导致下次进入/提交读到旧值。失败时静默：Agent 提交会
+  // 随请求携带最新文档（system_prompt），由后端落库兑底，不依赖此回调成功。
+  const persistDoc = async () => {
+    if (!draft) return
+    try {
+      await updateDraft(fid, draft.name, treeRef.current, systemPrompt)
+    } catch {
+      // 静默失败——树中间态不合法等场景由提交携带兑底
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -67,6 +87,18 @@ export default function FlowEditor() {
       setRuns(runsResp.runs || [])
       setRunsTotal(runsResp.total || 0)
       setRunsPage(1)
+      setSystemPrompt(d.system_prompt ?? '')
+      // 只读成员不能编辑文档（后端仍会拒绝写请求，此为前置 UX）
+      try {
+        const m = await listMembers(d.test_set_id)
+        const me = currentUser()
+        setCanEdit(
+          m.owner.user_id === me?.id ||
+            m.members.some((x) => x.user_id === me?.id && x.role !== 'read'),
+        )
+      } catch {
+        setCanEdit(true)
+      }
     } catch (e) {
       setErr(apiError(e))
     }
@@ -139,9 +171,10 @@ export default function FlowEditor() {
     }
   }
 
-  const restoreTree = (treeStr: string) => {
+  const restoreTree = (treeStr: string, doc?: string) => {
     try {
       const t = parseTree(treeStr)
+      if (doc !== undefined) setSystemPrompt(doc)
       onTreeChange(t)
       save()
     } catch (e) {
@@ -156,7 +189,7 @@ export default function FlowEditor() {
     setBusy(true)
     try {
       if (draft) {
-        await updateDraft(fid, draft.name, treeRef.current)
+        await updateDraft(fid, draft.name, treeRef.current, systemPrompt)
         setDraft(await getDraft(fid))
       }
       const v = await validateDraft(fid)
@@ -260,10 +293,77 @@ export default function FlowEditor() {
             )}
           </button>
           <div className="side-body">
+            <section className="card side-card">
+              <button
+                className="side-card-head"
+                onClick={() =>
+                  setPromptOpen((o) => {
+                    localStorage.setItem('kianshu_prompt_open', o ? '0' : '1')
+                    return !o
+                  })
+                }
+                aria-expanded={promptOpen}
+              >
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6" />
+                  </svg>
+                  流系统提示词
+                </span>
+                <span aria-hidden="true">{promptOpen ? '▾' : '▸'}</span>
+              </button>
+              {promptOpen && (
+                <div style={{ padding: 'var(--space-2) 0 0' }}>
+                  <div className="row tight">
+                    <button
+                      className={`link${!promptPreview ? ' on' : ''}`}
+                      onClick={() => setPromptPreview(false)}
+                      disabled={!canEdit}
+                    >
+                      编辑
+                    </button>
+                    <button className={`link${promptPreview ? ' on' : ''}`} onClick={() => setPromptPreview(true)}>
+                      预览
+                    </button>
+                    <span className="muted" style={{ flex: 1 }} />
+                    <span className="muted" style={{ fontSize: 11 }}>
+                      {systemPrompt.length}/{MAX_DOC_LEN}
+                    </span>
+                  </div>
+                  {promptPreview || !canEdit ? (
+                    <pre className="doc-preview mono">
+                      {systemPrompt || '(未填写，提交时不注入任何额外上下文)'}
+                    </pre>
+                  ) : (
+                    <textarea
+                      className="doc-input"
+                      placeholder={'粘贴/编写本流的业务文档、签名规则等\nAgent 生成/编辑本流时以此为准（优先级高于全局规则）\n保存草稿后生效，随时可改，下次提交立即生效'}
+                      value={systemPrompt}
+                      maxLength={MAX_DOC_LEN}
+                      onChange={(e) => setSystemPrompt(e.target.value)}
+                      onBlur={persistDoc}
+                      spellCheck={false}
+                    />
+                  )}
+                  {systemPrompt.length >= MAX_DOC_LEN && (
+                    <div className="err" style={{ marginTop: 4 }}>
+                      已达 8KB 上限，请精简文档
+                    </div>
+                  )}
+                  {!canEdit && (
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      只读成员：文档仅可查看
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
             <AgentDialog
               flowID={fid}
               providers={providers}
               tree={tree}
+              systemPrompt={systemPrompt}
               onChanged={() => load()}
               onTreePreview={onTreePreview}
             />

@@ -25,8 +25,8 @@ func newFakeScheduler() *fakeScheduler {
 	return &fakeScheduler{jobs: map[string]func(){}}
 }
 
-func (f *fakeScheduler) Start()      {}
-func (f *fakeScheduler) Stop()       {}
+func (f *fakeScheduler) Start() {}
+func (f *fakeScheduler) Stop()  {}
 func (f *fakeScheduler) ValidateCron(expr string) error {
 	if expr != "not-a-cron" {
 		return nil
@@ -78,7 +78,7 @@ func TestScheduleCreateListPauseResumeDelete(t *testing.T) {
 	if err := gdb.Create(ts).Error; err != nil {
 		t.Fatalf("create test set: %v", err)
 	}
-	f, err := CreateFlow(gdb, ts.ID, 1, "flow")
+	f, err := CreateFlow(gdb, ts.ID, 1, "flow", "")
 	if err != nil {
 		t.Fatalf("create flow: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestScheduleInvalidCronRejected(t *testing.T) {
 	if err := gdb.Create(ts).Error; err != nil {
 		t.Fatalf("create test set: %v", err)
 	}
-	f, err := CreateFlow(gdb, ts.ID, 1, "flow")
+	f, err := CreateFlow(gdb, ts.ID, 1, "flow", "")
 	if err != nil {
 		t.Fatalf("create flow: %v", err)
 	}
