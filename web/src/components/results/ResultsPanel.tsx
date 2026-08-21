@@ -17,7 +17,8 @@ interface Props {
   versions: FlowVersion[]
   onPageChange: (page: number) => void
   onChanged: () => void
-  onRestore: (tree: string) => void
+  /** 恢复时回填树（可选带回版本快照中的流级文档，语义同 UpdateDraft：undefined 不改动） */
+  onRestore: (tree: string, systemPrompt?: string) => void
 }
 
 interface NodeResult {
@@ -100,7 +101,7 @@ export default function ResultsPanel({
   const restoreVer = async (v: FlowVersion) => {
     try {
       const full = await getVersion(flowID, v.version_no)
-      onRestore(full.tree)
+      onRestore(full.tree, full.system_prompt)
     } catch (e) {
       setErr(apiError(e))
     }

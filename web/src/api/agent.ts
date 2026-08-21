@@ -45,6 +45,7 @@ export interface AgentSubmitReq {
   instruction: string
   selected_nodes?: string[]
   mode: 'edit' | 'generate'
+  system_prompt?: string
 }
 
 export async function agentSession(flowID: number) {

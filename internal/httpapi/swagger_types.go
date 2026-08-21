@@ -82,6 +82,16 @@ type createFlowReq struct {
 	Name string `json:"name" validate:"required" minLength:"1" example:"我的测试流"`
 }
 
+// duplicateFlowReq is the optional name override for a duplicated flow.
+type duplicateFlowReq struct {
+	Name string `json:"name" example:"我的测试流 副本"`
+}
+
+// renameFlowReq renames a flow.
+type renameFlowReq struct {
+	Name string `json:"name" validate:"required" minLength:"1" example:"支付流程"`
+}
+
 // draftView is the readable view of a flow's working draft.
 type draftView struct {
 	FlowID uint   `json:"flow_id" example:"1"`

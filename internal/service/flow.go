@@ -22,7 +22,8 @@ var ErrFlowNotFound = errors.New("流不存在")
 var ErrFlowValidation = errors.New("流校验失败")
 
 // CreateFlow creates a test flow and its initial empty draft (a start node).
-func CreateFlow(db *gorm.DB, testSetID, userID uint, name string) (*model.TestFlow, error) {
+// systemPrompt is the optional flow-scoped context document.
+func CreateFlow(db *gorm.DB, testSetID, userID uint, name, systemPrompt string) (*model.TestFlow, error) {
 	f := &model.TestFlow{TestSetID: testSetID, Name: name, CreatedBy: userID}
 	if err := db.Create(f).Error; err != nil {
 		return nil, err
@@ -33,7 +34,7 @@ func CreateFlow(db *gorm.DB, testSetID, userID uint, name string) (*model.TestFl
 			"n1": flow.NewNode("n1", flow.NodeStart),
 		},
 	}
-	draft := &model.FlowDraft{FlowID: f.ID, Name: name, Tree: tree.String()}
+	draft := &model.FlowDraft{FlowID: f.ID, Name: name, Tree: tree.String(), SystemPrompt: systemPrompt}
 	if err := db.Create(draft).Error; err != nil {
 		return nil, err
 	}
@@ -49,8 +50,11 @@ func GetDraft(db *gorm.DB, flowID uint) (*model.FlowDraft, error) {
 	return &d, nil
 }
 
-// UpdateDraft replaces the working draft with a new whole-tree snapshot.
-func UpdateDraft(db *gorm.DB, flowID uint, name, treeJSON string) (*model.FlowDraft, error) {
+// UpdateDraft replaces the working draft with a new whole-tree snapshot and,
+// when systemPrompt is non-nil, the flow-scoped context document. A nil
+// systemPrompt leaves the existing document untouched (partial update); an
+// explicit empty string clears it.
+func UpdateDraft(db *gorm.DB, flowID uint, name, treeJSON string, systemPrompt *string) (*model.FlowDraft, error) {
 	tree, err := flow.ParseTree(treeJSON)
 	if err != nil {
 		return nil, err
@@ -65,10 +69,25 @@ func UpdateDraft(db *gorm.DB, flowID uint, name, treeJSON string) (*model.FlowDr
 	}
 	d.Name = name
 	d.Tree = tree.String()
+	if systemPrompt != nil {
+		d.SystemPrompt = *systemPrompt
+	}
 	if err := db.Save(d).Error; err != nil {
 		return nil, err
 	}
 	return d, nil
+}
+
+// UpdateFlowDoc 更新流的系统提示词文档（system_prompt 列）。
+// 仅当 doc 非 nil 时写库：nil 表示不修改（部分更新），显式空串表示清空。
+// 只写该列、不触碰 tree——用于 Agent 提交前把前端最新文档落库，
+// 使 GenerateFlow/RunAgent 内 GetDraft 实时现读到最新值，消除
+// "编辑后未保存即提交读旧值" 的竞态。
+func UpdateFlowDoc(db *gorm.DB, flowID uint, doc *string) error {
+	if doc == nil {
+		return nil
+	}
+	return db.Model(&model.FlowDraft{}).Where("flow_id = ?", flowID).Update("system_prompt", *doc).Error
 }
 
 // StripOrphanInputs 移除所有 Source 为空的 input。
@@ -131,6 +150,67 @@ func DeleteFlow(db *gorm.DB, sched *ScheduleManager, flowID uint) error {
 	return nil
 }
 
+// DuplicateFlow 复制一个测试流及其当前草稿到同一测试集下的新流。
+// name 为空时自动生成为 `{原名} 副本`。复制只携带当前工作状态（草稿树），
+// 不复制版本快照、运行记录、定时调度与 Agent 会话。
+func DuplicateFlow(db *gorm.DB, flowID, userID uint, name string) (*model.TestFlow, error) {
+	var f model.TestFlow
+	if err := db.First(&f, flowID).Error; err != nil {
+		return nil, ErrFlowNotFound
+	}
+	newName := strings.TrimSpace(name)
+	if newName == "" {
+		newName = f.Name + " 副本"
+	}
+	var dup *model.TestFlow
+	err := db.Transaction(func(tx *gorm.DB) error {
+		nd := &model.TestFlow{TestSetID: f.TestSetID, Name: newName, CreatedBy: userID}
+		if err := tx.Create(nd).Error; err != nil {
+			return err
+		}
+		treeJSON := ""
+		systemPrompt := ""
+		var d model.FlowDraft
+		if err := tx.Where("flow_id = ?", flowID).Order("id").First(&d).Error; err == nil {
+			treeJSON = d.Tree
+			systemPrompt = d.SystemPrompt
+		}
+		draft := &model.FlowDraft{FlowID: nd.ID, Name: newName, Tree: treeJSON, SystemPrompt: systemPrompt}
+		if err := tx.Create(draft).Error; err != nil {
+			return err
+		}
+		dup = nd
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dup, nil
+}
+
+// RenameFlow 重命名测试流,同步更新流记录与草稿记录中的名称,
+// 保证列表展示与编辑器标题一致。draft 不存在时仅更新流记录。
+func RenameFlow(db *gorm.DB, flowID uint, name string) (*model.TestFlow, error) {
+	var f model.TestFlow
+	if err := db.First(&f, flowID).Error; err != nil {
+		return nil, ErrFlowNotFound
+	}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.TestFlow{}).Where("id = ?", flowID).Update("name", name).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.FlowDraft{}).Where("flow_id = ?", flowID).Update("name", name).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	f.Name = name
+	return &f, nil
+}
+
 // swaggerParam is one parameter entry parsed from a unit's Params JSON array
 // (OpenAPI 2.0 format).
 type swaggerParam struct {
@@ -142,9 +222,9 @@ type swaggerParam struct {
 
 // swaggerSchema is a JSON Schema subset extracted from a request_body.
 type swaggerSchema struct {
-	Type       string                    `json:"type"`
-	Properties map[string]swaggerSchema  `json:"properties"`
-	Required   []string                  `json:"required,omitempty"`
+	Type       string                   `json:"type"`
+	Properties map[string]swaggerSchema `json:"properties"`
+	Required   []string                 `json:"required,omitempty"`
 }
 
 // deriveInputs parses a test unit's swagger params and request_body strings,
@@ -333,11 +413,12 @@ func SaveAndEnable(db *gorm.DB, flowID, userID uint) (*model.FlowVersion, *flow.
 			return err
 		}
 		version = &model.FlowVersion{
-			FlowID:    flowID,
-			VersionNo: maxNo + 1,
-			Tree:      tree.String(),
-			Enabled:   true,
-			CreatedBy: userID,
+			FlowID:       flowID,
+			VersionNo:    maxNo + 1,
+			Tree:         tree.String(),
+			SystemPrompt: d.SystemPrompt,
+			Enabled:      true,
+			CreatedBy:    userID,
 		}
 		return tx.Create(version).Error
 	})

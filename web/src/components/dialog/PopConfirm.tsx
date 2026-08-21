@@ -15,6 +15,8 @@ interface Props {
   message: ReactNode
   /** 可选标题 */
   title?: ReactNode
+  /** 可选输入框：提供时弹窗内渲染输入框，确认时把输入值传给 onConfirm */
+  input?: { defaultValue?: string; placeholder?: string }
   /** 确认按钮文案，默认「确定」 */
   confirmText?: string
   /** 取消按钮文案，默认「取消」 */
@@ -23,8 +25,8 @@ interface Props {
   danger?: boolean
   /** 弹出方向，默认在按钮下方 */
   placement?: 'bottom' | 'top'
-  /** 确认回调 */
-  onConfirm: () => void
+  /** 确认回调；有 input 时携带输入值 */
+  onConfirm: (value?: string) => void
   /** 触发元素（通常是 button） */
   children: ReactElement<any>
 }
@@ -32,10 +34,12 @@ interface Props {
 /**
  * 同主题的小确认弹框：点击按钮后在其附近弹出，替代原生 confirm() 的霸屏白框。
  * 通过 portal 渲染到 body，按触发元素位置自动定位并对视口做边缘修正。
+ * 提供 input prop 时变为带输入框的弹窗（复制/改名等场景），Enter 提交。
  */
 export default function PopConfirm({
   message,
   title,
+  input,
   confirmText = '确定',
   cancelText = '取消',
   danger = false,
@@ -44,6 +48,7 @@ export default function PopConfirm({
   children,
 }: Props) {
   const [open, setOpen] = useState(false)
+  const [value, setValue] = useState(input?.defaultValue ?? '')
   const [pos, setPos] = useState({ left: 0, top: 0 })
   const anchorRef = useRef<HTMLSpanElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
@@ -94,12 +99,22 @@ export default function PopConfirm({
       e.stopPropagation()
       ;(children.props as { onClick?: (e: React.MouseEvent) => void }).onClick?.(e)
       setOpen((o) => !o)
+      if (input) setValue(input.defaultValue ?? '')
     },
   })
 
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useLayoutEffect(() => {
+    if (open && input) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [open, input])
+
   const confirm = () => {
     setOpen(false)
-    onConfirm()
+    onConfirm(input ? value : undefined)
   }
 
   return (
@@ -127,6 +142,21 @@ export default function PopConfirm({
                 <div className="popconfirm-msg">{message}</div>
               </div>
             </div>
+            {input && (
+              <input
+                ref={inputRef}
+                className="popconfirm-input"
+                value={value}
+                placeholder={input.placeholder}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.stopPropagation()
+                    confirm()
+                  }
+                }}
+              />
+            )}
             <div className="popconfirm-actions">
               <button className="ghost" onClick={() => setOpen(false)}>
                 {cancelText}

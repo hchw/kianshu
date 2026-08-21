@@ -802,6 +802,52 @@ h3 {
   align-self: flex-start;
 }
 
+.side-card-head {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ width: 100%;
+ border: none;
+ background: none;
+ color: var(--text);
+ font-weight: 600;
+ font-size: var(--fs-13);
+ cursor: pointer;
+ padding: 2px 0;
+}
+
+.side-card-head:hover {
+ color: var(--primary);
+}
+
+.doc-input {
+ font-size: var(--fs-13);
+ line-height: 1.5;
+ min-height: 180px;
+ max-height: 320px;
+ resize: vertical;
+ font-family: var(--font-mono, monospace);
+}
+
+.doc-input:disabled {
+ opacity: 0.6;
+ cursor: not-allowed;
+}
+
+.doc-preview {
+ font-size: var(--fs-12);
+ line-height: 1.6;
+ white-space: pre-wrap;
+ word-break: break-word;
+ background: var(--surface);
+ border: 1px solid var(--border);
+ border-radius: var(--radius-6);
+ padding: 8px;
+ max-height: 320px;
+ overflow: auto;
+ margin: 0;
+}
+
 .rail-label {
   writing-mode: vertical-rl;
   text-orientation: mixed;
@@ -1508,6 +1554,21 @@ h3 {
 .popconfirm-actions button {
   padding: 4px 12px;
   font-size: var(--fs-12);
+}
+.popconfirm-input {
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: 6px 10px;
+  font-size: var(--fs-13);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-6);
+  background: var(--surface);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.popconfirm-input:focus {
+  outline: none;
+  border-color: var(--primary);
 }
 
 /* ============================================================

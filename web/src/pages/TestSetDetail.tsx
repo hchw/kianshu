@@ -9,7 +9,7 @@ import {
   type FlowSummary,
   type TestSet,
 } from '../api/testset'
-import { deleteFlow } from '../api/flow'
+import { deleteFlow, duplicateFlow, renameFlow } from '../api/flow'
 import ImportPanel from '../components/testset/ImportPanel'
 import UnitsBrowser from '../components/testset/UnitsBrowser'
 import MembersPanel from '../components/testset/MembersPanel'
@@ -20,7 +20,7 @@ import { EmptyState } from '../components/feedback/EmptyState'
 import { ErrorNote } from '../components/feedback/ErrorNote'
 import PopConfirm from '../components/dialog/PopConfirm'
 import { useToast } from '../components/feedback/Toast'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, Pencil } from 'lucide-react'
 
 type Tab = 'overview' | 'import' | 'units' | 'members'
 
@@ -33,6 +33,8 @@ export default function TestSetDetail() {
   const [flows, setFlows] = useState<FlowSummary[]>([])
   const [host, setHost] = useState('')
   const [flowName, setFlowName] = useState('')
+  const [editingID, setEditingID] = useState<number | null>(null)
+  const [editingName, setEditingName] = useState('')
   const [tab, setTab] = useState<Tab>('overview')
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
@@ -85,6 +87,41 @@ export default function TestSetDetail() {
     try {
       await deleteFlow(f.id)
       toast.success('测试流已删除')
+      await load()
+    } catch (e) {
+      const msg = apiError(e)
+      setErr(msg)
+      toast.error(msg)
+    }
+  }
+
+  const copyFlow = async (f: FlowSummary, name?: string) => {
+    const trimmed = name?.trim()
+    if (!trimmed) return
+    try {
+      await duplicateFlow(f.id, trimmed)
+      toast.success('测试流已复制')
+      await load()
+    } catch (e) {
+      const msg = apiError(e)
+      setErr(msg)
+      toast.error(msg)
+    }
+  }
+
+  const startRename = (f: FlowSummary) => {
+    setEditingID(f.id)
+    setEditingName(f.name)
+  }
+
+  const commitRename = async () => {
+    const id = editingID
+    const name = editingName.trim()
+    setEditingID(null)
+    if (!id || !name || name === flows.find((x) => x.id === id)?.name) return
+    try {
+      await renameFlow(id, name)
+      toast.success('测试流已重命名')
       await load()
     } catch (e) {
       const msg = apiError(e)
@@ -155,8 +192,46 @@ export default function TestSetDetail() {
               ) : (
                 flows.map((f) => (
                   <div key={f.id} className="card item" onClick={() => nav(`/flows/${f.id}`)}>
-                    <span className="strong">{f.name}</span>
+                    {editingID === f.id ? (
+                      <input
+                        autoFocus
+                        className="mono"
+                        value={editingName}
+                        placeholder="流名称"
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          e.stopPropagation()
+                          if (e.key === 'Enter') void commitRename()
+                          else if (e.key === 'Escape') setEditingID(null)
+                        }}
+                        onBlur={() => setEditingID(null)}
+                      />
+                    ) : (
+                      <span className="strong">{f.name}</span>
+                    )}
+                    {editingID !== f.id && (
+                      <button
+                        className="link"
+                        title="重命名"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          startRename(f)
+                        }}
+                      >
+                        <Pencil size={14} aria-hidden="true" />
+                      </button>
+                    )}
                     <span className="muted">打开编辑器 →</span>
+                    <PopConfirm
+                      title="复制测试流"
+                      message={`将「${f.name}」的当前草稿复制为新流`}
+                      input={{ defaultValue: `${f.name} 副本`, placeholder: '新流名称' }}
+                      confirmText="复制"
+                      onConfirm={(name) => void copyFlow(f, name)}
+                    >
+                      <button className="link">复制</button>
+                    </PopConfirm>
                     <PopConfirm
                       danger
                       message={`删除测试流「${f.name}」?\n将一并删除其版本、运行记录与定时调度,不可恢复。`}

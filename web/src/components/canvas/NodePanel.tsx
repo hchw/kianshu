@@ -388,7 +388,7 @@ function AssertEditor({
             <input
               className="mono small"
               style={{ flex: 1, minWidth: 80 }}
-              placeholder="期望值"
+              placeholder={'期望值：数字200 / 字符串"abc"或裸abc / true/false / null / [1,2]'}
               value={a.expected}
               onChange={(e) => update(i, { expected: e.target.value })}
             />

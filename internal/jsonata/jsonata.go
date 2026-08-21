@@ -53,7 +53,7 @@ func EvalWithVars(expr string, data any, vars map[string]interface{}) (any, erro
 // Exts returns the encryption-suite extension functions, shared by all
 // expression evaluations. Names are registered without the leading '$'.
 func Exts() map[string]jsonata.Extension {
-	return map[string]jsonata.Extension{
+	m := map[string]jsonata.Extension{
 		"base64encode": {Func: func(s string) string {
 			return base64.StdEncoding.EncodeToString([]byte(s))
 		}},
@@ -93,6 +93,25 @@ func Exts() map[string]jsonata.Extension {
 			return fmt.Sprintf("%x", mac.Sum(nil)), nil
 		}},
 	}
+	for name, ext := range extsTime() {
+		m[name] = ext
+	}
+	for name, ext := range extsSort() {
+		m[name] = ext
+	}
+	for name, ext := range extsEncoding() {
+		m[name] = ext
+	}
+	for name, ext := range extsHashB64() {
+		m[name] = ext
+	}
+	for name, ext := range extsAES() {
+		m[name] = ext
+	}
+	for name, ext := range extsRSA() {
+		m[name] = ext
+	}
+	return m
 }
 
 func registerExts(e *jsonata.Expr) {

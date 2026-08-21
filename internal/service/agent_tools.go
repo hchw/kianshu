@@ -139,12 +139,12 @@ func execListUnits(db *gorm.DB, testSetID uint, raw json.RawMessage) *ToolResult
 
 // createNodeArgs is the create_node argument shape.
 type createNodeArgs struct {
-	ID     string          `json:"id"`
-	Type   string          `json:"type"`
-	Parent string          `json:"parent"`
-	Inputs map[string]flow.IOKey  `json:"inputs"`
+	ID      string                `json:"id"`
+	Type    string                `json:"type"`
+	Parent  string                `json:"parent"`
+	Inputs  map[string]flow.IOKey `json:"inputs"`
 	Outputs map[string]flow.IOKey `json:"outputs"`
-	Config json.RawMessage `json:"config"`
+	Config  json.RawMessage       `json:"config"`
 }
 
 func execCreateNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {
@@ -187,10 +187,10 @@ func execCreateNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 
 // updateNodeArgs matches update_node.
 type updateNodeArgs struct {
-	ID      string          `json:"id"`
-	Inputs  map[string]flow.IOKey  `json:"inputs"`
+	ID      string                `json:"id"`
+	Inputs  map[string]flow.IOKey `json:"inputs"`
 	Outputs map[string]flow.IOKey `json:"outputs"`
-	Config  json.RawMessage `json:"config"`
+	Config  json.RawMessage       `json:"config"`
 }
 
 func execUpdateNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {

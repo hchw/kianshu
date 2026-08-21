@@ -198,7 +198,7 @@ func resolveRefBody(raw json.RawMessage, defs map[string]json.RawMessage) json.R
 		return raw
 	}
 	var body struct {
-		Schema json.RawMessage `json:"schema"`
+		Schema  json.RawMessage `json:"schema"`
 		Content json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {

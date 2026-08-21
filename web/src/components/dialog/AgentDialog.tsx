@@ -14,6 +14,7 @@ interface Props {
   flowID: number
   providers: Provider[]
   tree: FlowTree
+  systemPrompt?: string
   onChanged: () => void
   onTreePreview: (t: FlowTree) => void
 }
@@ -25,7 +26,7 @@ interface Message {
   tool_call_id?: string
 }
 
-export default function AgentDialog({ flowID, providers, tree, onChanged, onTreePreview }: Props) {
+export default function AgentDialog({ flowID, providers, tree, systemPrompt, onChanged, onTreePreview }: Props) {
   const [providerID, setProviderID] = useState(0)
   const [instruction, setInstruction] = useState('')
   const [mode, setMode] = useState<'edit' | 'generate'>('generate')
@@ -190,6 +191,7 @@ export default function AgentDialog({ flowID, providers, tree, onChanged, onTree
       instruction: instruction.trim(),
       selected_nodes: selected.length ? selected : undefined,
       mode,
+      system_prompt: systemPrompt,
     }
     const url = `/api/flow/flows/${flowID}/agent/submit`
     abortRef.current = openSSE(url, body, {

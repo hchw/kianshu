@@ -220,11 +220,9 @@ func NewNode(id string, typ NodeType) *Node {
 // submitted. Call this after any mutation that changes parent pointers to
 // ensure the tree is fully consistent before serialisation.
 func (t *Tree) ReconcileChildren() {
-	for _, n := range t.Nodes {
-		if n != nil {
-			n.Children = nil
-		}
-	}
+	// 成员关系以 parent 指针为准，但 children 顺序保持已有列表（客户端
+	// 提交的 children 数组有序：try 的兄弟 catch 必须在可执行分支之后）。
+	// 仅把 parent 指针指向了本节点、却又不在 children 列表中的节点补进去。
 	for id, n := range t.Nodes {
 		if n == nil || n.Parent == "" {
 			continue

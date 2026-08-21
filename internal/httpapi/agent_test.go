@@ -33,6 +33,7 @@ type agentRound struct {
 func (f *agentFakeProvider) GetBaseURL() string { return "http://fake" }
 func (f *agentFakeProvider) GetAPIKey() string  { return "sk" }
 func (f *agentFakeProvider) GetModel() string   { return f.model }
+func (f *agentFakeProvider) GetStrictContent() bool { return false }
 
 func (f *agentFakeProvider) ChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest) (*openai.CompletionResponse, error) {
 	var r agentRound
@@ -202,6 +203,7 @@ type blockAfterFirstFake struct {
 func (f *blockAfterFirstFake) GetBaseURL() string { return "http://fake" }
 func (f *blockAfterFirstFake) GetAPIKey() string  { return "sk" }
 func (f *blockAfterFirstFake) GetModel() string   { return "m" }
+func (f *blockAfterFirstFake) GetStrictContent() bool { return false }
 
 func (f *blockAfterFirstFake) ChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest) (*openai.CompletionResponse, error) {
 	f.mu.Lock()

@@ -20,6 +20,7 @@ type agentSubmitReq struct {
 	Instruction   string   `json:"instruction" validate:"required" minLength:"1" example:"请为用户登录接口生成测试流"`
 	SelectedNodes []string `json:"selected_nodes,omitempty" example:"[\"get-users-{id}\"]"`
 	Mode          string   `json:"mode" enum:"edit,generate" example:"edit"`
+	SystemPrompt  *string  `json:"system_prompt,omitempty" example:"本流对接 XX 云签名规范"`
 }
 
 type agentResumeReq struct {
@@ -47,7 +48,7 @@ func (s *Server) agentProvider(c *gin.Context, providerID uint) (service.ChatPro
 	if s.AgentLLM != nil {
 		return s.AgentLLM, true
 	}
-	return &agentLLM{Client: s.LLM, cfg: &providerAdapter{p.BaseURL, key, p.Model}}, true
+	return &agentLLM{Client: s.LLM, cfg: &providerAdapter{p.BaseURL, key, p.Model, p.StrictContent}}, true
 }
 
 // agentLLM combines the shared OpenAI-compatible client with one user provider's
@@ -57,9 +58,10 @@ type agentLLM struct {
 	cfg *providerAdapter
 }
 
-func (a *agentLLM) GetBaseURL() string { return a.cfg.GetBaseURL() }
-func (a *agentLLM) GetAPIKey() string  { return a.cfg.GetAPIKey() }
-func (a *agentLLM) GetModel() string   { return a.cfg.GetModel() }
+func (a *agentLLM) GetBaseURL() string     { return a.cfg.GetBaseURL() }
+func (a *agentLLM) GetAPIKey() string      { return a.cfg.GetAPIKey() }
+func (a *agentLLM) GetModel() string       { return a.cfg.GetModel() }
+func (a *agentLLM) GetStrictContent() bool { return a.cfg.GetStrictContent() }
 
 // handleAgentSubmit runs one agent submission. With Accept: text/event-stream
 // it streams each tool round as SSE; otherwise it returns the collected events.
@@ -144,6 +146,13 @@ func (s *Server) handleAgentSubmit(c *gin.Context) {
 
 // runAgent dispatches to generate or edit mode.
 func (s *Server) runAgent(c *gin.Context, flowID uint, req agentSubmitReq, provider service.ChatProvider, mode service.Mode, emit func(service.Event)) (*service.AgentResult, error) {
+	// 前端提交携带最新流系统提示词时先落库，确保下游 GetDraft 实时现读到最新值
+	//（含生成模式），消除"编辑后未保存即提交读旧值"的竞态。
+	if req.SystemPrompt != nil {
+		if err := service.UpdateFlowDoc(s.DB, flowID, req.SystemPrompt); err != nil {
+			return nil, err
+		}
+	}
 	if mode == service.ModeGenerate {
 		return service.GenerateFlow(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Instruction, provider, service.AgentHooks{Emit: emit})
 	}
@@ -192,10 +201,10 @@ func (s *Server) submitSSE(c *gin.Context, flowID uint, req agentSubmitReq, prov
 			io.WriteString(w, "data: "+string(data)+"\n\n")
 			return true
 		case err := <-done:
-				if err != nil {
-					log.Errorf("agent: submitSSE flow=%d 执行失败: %v", flowID, err)
-					io.WriteString(w, "event: error\ndata: "+jsonString(err.Error())+"\n\n")
-				}
+			if err != nil {
+				log.Errorf("agent: submitSSE flow=%d 执行失败: %v", flowID, err)
+				io.WriteString(w, "event: error\ndata: "+jsonString(err.Error())+"\n\n")
+			}
 			io.WriteString(w, "data: [DONE]\n\n")
 			return false
 		}

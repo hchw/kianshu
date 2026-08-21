@@ -54,4 +54,5 @@ server
 main
 *.db
 .omp
-.pi
+.pinode_modules/
+.pi/

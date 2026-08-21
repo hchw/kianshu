@@ -39,10 +39,10 @@ func testDB(t *testing.T) *gorm.DB {
 
 func TestDeriveInputs(t *testing.T) {
 	unit := model.TestUnit{
-		ID:     1,
-		Method: "POST",
-		Path:   "/login",
-		Params: `[{"name":"Authorization","in":"header","type":"string"},{"name":"id","in":"path","type":"integer","required":true}]`,
+		ID:          1,
+		Method:      "POST",
+		Path:        "/login",
+		Params:      `[{"name":"Authorization","in":"header","type":"string"},{"name":"id","in":"path","type":"integer","required":true}]`,
 		RequestBody: `{"type":"object","properties":{"username":{"type":"string"},"password":{"type":"string"}},"required":["username","password"]}`,
 	}
 
@@ -109,8 +109,8 @@ func TestDeriveInputsParseFailure(t *testing.T) {
 
 func TestDeriveInputsObjectType(t *testing.T) {
 	u := model.TestUnit{
-		ID:   4,
-		Params: `[{"name":"config","in":"body","type":"object"}]`,
+		ID:          4,
+		Params:      `[{"name":"config","in":"body","type":"object"}]`,
 		RequestBody: `{"type":"object","properties":{"nested":{"type":"object"},"items":{"type":"array"}}}`,
 	}
 	io := deriveInputs(u)
@@ -128,8 +128,8 @@ func TestDeriveInputsObjectType(t *testing.T) {
 func TestDeriveInputsParamsOverrideBody(t *testing.T) {
 	// Same key in both params and request_body → params wins.
 	u := model.TestUnit{
-		ID:   5,
-		Params: `[{"name":"email","in":"query","type":"string"}]`,
+		ID:          5,
+		Params:      `[{"name":"email","in":"query","type":"string"}]`,
 		RequestBody: `{"type":"object","properties":{"email":{"type":"integer"}}}`,
 	}
 	io := deriveInputs(u)
@@ -328,7 +328,7 @@ func setupFlow(t *testing.T, gdb *gorm.DB, host string) (flowID uint, tree *flow
 	if err := gdb.Create(unit).Error; err != nil {
 		t.Fatalf("create unit: %v", err)
 	}
-	f, err := CreateFlow(gdb, ts.ID, 1, "flow")
+	f, err := CreateFlow(gdb, ts.ID, 1, "flow", "")
 	if err != nil {
 		t.Fatalf("create flow: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestConcurrentSaveAndEnableDistinctVersionNos(t *testing.T) {
 	if err := gdb.Create(unit).Error; err != nil {
 		t.Fatalf("create unit: %v", err)
 	}
-	f, err := CreateFlow(gdb, ts.ID, 1, "flow")
+	f, err := CreateFlow(gdb, ts.ID, 1, "flow", "")
 	if err != nil {
 		t.Fatalf("create flow: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestConcurrentSaveAndEnableDistinctVersionNos(t *testing.T) {
 // schedules, cancels registered jobs and rejects missing flows.
 func TestDeleteFlow(t *testing.T) {
 	gdb := testDB(t)
-	f, err := CreateFlow(gdb, 1, 1, "待删流")
+	f, err := CreateFlow(gdb, 1, 1, "待删流", "")
 	if err != nil {
 		t.Fatalf("create flow: %v", err)
 	}
@@ -612,5 +612,261 @@ func TestDeleteFlow(t *testing.T) {
 	}
 	if err := DeleteFlow(gdb, mgr, f.ID); !errors.Is(err, ErrFlowNotFound) {
 		t.Fatalf("expected ErrFlowNotFound on second delete, got %v", err)
+	}
+}
+
+// TestDuplicateFlow verifies DuplicateFlow clones the current draft into a new
+// flow with derived or custom names, and rejects missing source flows.
+func TestDuplicateFlow(t *testing.T) {
+	gdb := testDB(t)
+	f, err := CreateFlow(gdb, 1, 1, "支付流程", "")
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	// 写入一棵非空树作为工作状态。
+	tree := `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`
+	if _, err := UpdateDraft(gdb, f.ID, "支付流程", tree, nil); err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+
+	t.Run("default name derived", func(t *testing.T) {
+		dup, err := DuplicateFlow(gdb, f.ID, 2, "")
+		if err != nil {
+			t.Fatalf("duplicate: %v", err)
+		}
+		if dup.ID == f.ID {
+			t.Fatal("duplicated flow must have a new ID")
+		}
+		if dup.TestSetID != f.TestSetID {
+			t.Fatalf("test set: got %d want %d", dup.TestSetID, f.TestSetID)
+		}
+		if dup.Name != "支付流程 副本" {
+			t.Fatalf("name: got %q want %q", dup.Name, "支付流程 副本")
+		}
+		if dup.CreatedBy != 2 {
+			t.Fatalf("created_by: got %d want 2", dup.CreatedBy)
+		}
+		d, err := GetDraft(gdb, dup.ID)
+		if err != nil {
+			t.Fatalf("get duplicated draft: %v", err)
+		}
+		if d.Name != dup.Name {
+			t.Fatalf("draft name: got %q want %q", d.Name, dup.Name)
+		}
+		if d.Tree != tree {
+			t.Fatalf("draft tree: got %q want %q", d.Tree, tree)
+		}
+		// 复制必须独立:改新流草稿不影响原流。
+		if _, err := UpdateDraft(gdb, dup.ID, dup.Name, `{"start":"n2","nodes":{"n2":{"id":"n2","type":"start"}}}`, nil); err != nil {
+			t.Fatalf("update dup draft: %v", err)
+		}
+		orig, err := GetDraft(gdb, f.ID)
+		if err != nil {
+			t.Fatalf("get original draft: %v", err)
+		}
+		if orig.Tree != tree {
+			t.Fatal("original draft must be unaffected by duplicate edits")
+		}
+	})
+
+	t.Run("custom name", func(t *testing.T) {
+		dup, err := DuplicateFlow(gdb, f.ID, 1, "回归基线")
+		if err != nil {
+			t.Fatalf("duplicate: %v", err)
+		}
+		if dup.Name != "回归基线" {
+			t.Fatalf("name: got %q want %q", dup.Name, "回归基线")
+		}
+	})
+
+	t.Run("missing flow", func(t *testing.T) {
+		if _, err := DuplicateFlow(gdb, 9999, 1, ""); !errors.Is(err, ErrFlowNotFound) {
+			t.Fatalf("expected ErrFlowNotFound, got %v", err)
+		}
+	})
+
+	t.Run("empty draft still copies", func(t *testing.T) {
+		f2, err := CreateFlow(gdb, 1, 1, "空流", "")
+		if err != nil {
+			t.Fatalf("create flow: %v", err)
+		}
+		if err := gdb.Where("flow_id = ?", f2.ID).Delete(&model.FlowDraft{}).Error; err != nil {
+			t.Fatalf("delete draft: %v", err)
+		}
+		dup, err := DuplicateFlow(gdb, f2.ID, 1, "")
+		if err != nil {
+			t.Fatalf("duplicate empty-draft flow: %v", err)
+		}
+		d, err := GetDraft(gdb, dup.ID)
+		if err != nil {
+			t.Fatalf("get draft: %v", err)
+		}
+		if d.Tree != "" {
+			t.Fatalf("expected empty tree, got %q", d.Tree)
+		}
+	})
+}
+
+// TestRenameFlow verifies renaming keeps TestFlow.Name and FlowDraft.Name in
+// sync, and tolerates a missing draft.
+func TestRenameFlow(t *testing.T) {
+	gdb := testDB(t)
+	f, err := CreateFlow(gdb, 1, 1, "旧名字", "")
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	renamed, err := RenameFlow(gdb, f.ID, "新名字")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if renamed.Name != "新名字" {
+		t.Fatalf("flow name: got %q want %q", renamed.Name, "新名字")
+	}
+	var flowRow model.TestFlow
+	if err := gdb.First(&flowRow, f.ID).Error; err != nil {
+		t.Fatalf("reload flow: %v", err)
+	}
+	if flowRow.Name != "新名字" {
+		t.Fatalf("persisted flow name: got %q", flowRow.Name)
+	}
+	d, err := GetDraft(gdb, f.ID)
+	if err != nil {
+		t.Fatalf("get draft: %v", err)
+	}
+	if d.Name != "新名字" {
+		t.Fatalf("draft name: got %q want %q", d.Name, "新名字")
+	}
+
+	t.Run("missing draft tolerated", func(t *testing.T) {
+		f2, err := CreateFlow(gdb, 1, 1, "无草稿", "")
+		if err != nil {
+			t.Fatalf("create flow: %v", err)
+		}
+		if err := gdb.Where("flow_id = ?", f2.ID).Delete(&model.FlowDraft{}).Error; err != nil {
+			t.Fatalf("delete draft: %v", err)
+		}
+		if _, err := RenameFlow(gdb, f2.ID, "改名成功"); err != nil {
+			t.Fatalf("rename without draft: %v", err)
+		}
+		var flowRow model.TestFlow
+		if err := gdb.First(&flowRow, f2.ID).Error; err != nil {
+			t.Fatalf("reload flow: %v", err)
+		}
+		if flowRow.Name != "改名成功" {
+			t.Fatalf("flow name: got %q", flowRow.Name)
+		}
+	})
+
+	t.Run("missing flow", func(t *testing.T) {
+		if _, err := RenameFlow(gdb, 9999, "x"); !errors.Is(err, ErrFlowNotFound) {
+			t.Fatalf("expected ErrFlowNotFound, got %v", err)
+		}
+	})
+}
+
+// TestSaveAndEnableSnapshotsSystemPrompt 验证版本固化时快照流级文档：
+// 版本不可变——后续草稿文档改动不影响已固化的旧版本；GetVersion 返回快照文档。
+func TestSaveAndEnableSnapshotsSystemPrompt(t *testing.T) {
+	gdb := testDB(t)
+	ts := &model.TestSet{Name: "ts", OwnerID: 1}
+	if err := gdb.Create(ts).Error; err != nil {
+		t.Fatalf("create test set: %v", err)
+	}
+	doc1 := "签名规则 v1：HMAC-SHA256"
+	f, err := CreateFlow(gdb, ts.ID, 1, "flow", doc1)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	// 初次固化：版本 1 快照当前草稿文档。
+	ver1, res, err := SaveAndEnable(gdb, f.ID, 1)
+	if err != nil {
+		t.Fatalf("save enable: %v (%+v)", err, res)
+	}
+	if ver1.VersionNo != 1 {
+		t.Fatalf("expected version 1, got %d", ver1.VersionNo)
+	}
+	if ver1.SystemPrompt != doc1 {
+		t.Fatalf("version 1 doc mismatch: %q", ver1.SystemPrompt)
+	}
+
+	// 改草稿文档后再固化：新版本带新文档，旧版本保持旧文档（自包含快照）。
+	doc2 := "签名规则 v2：SHA256withRSA"
+	if _, err := UpdateDraft(gdb, f.ID, "flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &doc2); err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+	ver2, res, err := SaveAndEnable(gdb, f.ID, 1)
+	if err != nil {
+		t.Fatalf("save enable v2: %v (%+v)", err, res)
+	}
+	if ver2.SystemPrompt != doc2 {
+		t.Fatalf("version 2 doc mismatch: %q", ver2.SystemPrompt)
+	}
+	got1, err := GetVersion(gdb, f.ID, 1)
+	if err != nil {
+		t.Fatalf("get version 1: %v", err)
+	}
+	if got1.SystemPrompt != doc1 {
+		t.Fatalf("immutable version 1 doc changed: %q", got1.SystemPrompt)
+	}
+
+	// 还原路径：前端取版本快照后经 UpdateDraft 写回草稿——文档一并覆盖。
+	got2, err := GetVersion(gdb, f.ID, 2)
+	if err != nil {
+		t.Fatalf("get version 2: %v", err)
+	}
+	if _, err := UpdateDraft(gdb, f.ID, "flow", got2.Tree, &got2.SystemPrompt); err != nil {
+		t.Fatalf("restore version 2: %v", err)
+	}
+	d, err := GetDraft(gdb, f.ID)
+	if err != nil {
+		t.Fatalf("get draft: %v", err)
+	}
+	if d.SystemPrompt != doc2 {
+		t.Fatalf("restored draft doc mismatch: %q", d.SystemPrompt)
+	}
+}
+
+// UpdateFlowDoc 只写 system_prompt 列：nil 不改、非 nil 覆盖、显式空串清空；
+// 且不触碰 tree（用于 Agent 提交前落库，避免依赖树是否合法）。
+func TestUpdateFlowDoc(t *testing.T) {
+	gdb := testDB(t)
+	ts := &model.TestSet{Name: "ts", OwnerID: 1}
+	if err := gdb.Create(ts).Error; err != nil {
+		t.Fatalf("create test set: %v", err)
+	}
+	f, err := CreateFlow(gdb, ts.ID, 1, "flow", "原文档")
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	// nil：不修改
+	if err := UpdateFlowDoc(gdb, f.ID, nil); err != nil {
+		t.Fatalf("nil update: %v", err)
+	}
+	if d, _ := GetDraft(gdb, f.ID); d.SystemPrompt != "原文档" {
+		t.Fatalf("nil 不应改动文档: %q", d.SystemPrompt)
+	}
+
+	// 非 nil：覆盖
+	doc := "签名规则 v2：SHA256withRSA"
+	if err := UpdateFlowDoc(gdb, f.ID, &doc); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if d, _ := GetDraft(gdb, f.ID); d.SystemPrompt != doc {
+		t.Fatalf("覆盖失败: %q", d.SystemPrompt)
+	}
+
+	// 显式空串：清空
+	empty := ""
+	if err := UpdateFlowDoc(gdb, f.ID, &empty); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if d, _ := GetDraft(gdb, f.ID); d.SystemPrompt != "" {
+		t.Fatalf("空串应清空文档: %q", d.SystemPrompt)
+	}
+	// 文档清空不影响 tree（仍可读取）
+	if _, err := GetDraft(gdb, f.ID); err != nil {
+		t.Fatalf("tree 读取失败: %v", err)
 	}
 }

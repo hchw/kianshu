@@ -249,11 +249,11 @@ func TestCatchRunsOnceOnFallback(t *testing.T) {
 	tree := treeOf(map[string]*flow.Node{
 		"n1": flow.NewNode("n1", flow.NodeStart),
 		"n2": flow.NewNode("n2", flow.NodeTry),
-		"n3": flow.NewNode("n3", flow.NodeAdapter),  // branch root
-		"n4": flow.NewNode("n4", flow.NodeAPI),      // protected, fails
-		"n5": flow.NewNode("n5", flow.NodeCatch),    // branch-local catch
-		"n6": flow.NewNode("n6", flow.NodeAPI),      // catch child (side effect)
-		"n7": flow.NewNode("n7", flow.NodeAdapter),  // sibling of try
+		"n3": flow.NewNode("n3", flow.NodeAdapter), // branch root
+		"n4": flow.NewNode("n4", flow.NodeAPI),     // protected, fails
+		"n5": flow.NewNode("n5", flow.NodeCatch),   // branch-local catch
+		"n6": flow.NewNode("n6", flow.NodeAPI),     // catch child (side effect)
+		"n7": flow.NewNode("n7", flow.NodeAdapter), // sibling of try
 	})
 	nodeCfg(t, tree.Nodes["n3"], map[string]any{"expr": `$`})
 	nodeCfg(t, tree.Nodes["n4"], map[string]any{"unit": map[string]any{"method": "GET", "path": "/boom"}})
@@ -384,7 +384,7 @@ func TestAPINodeUsesHostAndSnapshot(t *testing.T) {
 	})
 	nodeCfg(t, tree.Nodes["n2"], map[string]any{"unit": map[string]any{"method": "POST", "path": "/login"}})
 	tree.Nodes["n2"].Inputs = map[string]flow.IOKey{
-		"account":     {Type: flow.IOTypePrimitive},
+		"account":       {Type: flow.IOTypePrimitive},
 		"authorization": {Type: flow.IOTypePrimitive},
 	}
 	tree.AddChild("n1", "n2")
@@ -493,9 +493,9 @@ func TestCacheSetLiteralValues(t *testing.T) {
 	// 非 string 类型直接当字面量写入
 	nodeCfg(t, tree.Nodes["n2"], map[string]any{
 		"writes": map[string]any{
-			"count":  float64(3),
-			"flag":   true,
-			"items":  []any{"a", "b"},
+			"count": float64(3),
+			"flag":  true,
+			"items": []any{"a", "b"},
 		},
 	})
 	tree.AddChild("n1", "n2")
@@ -859,55 +859,55 @@ func TestFlow13ExecutionOrder(t *testing.T) {
 	nodeCfg(t, tree.Nodes["n_login"], map[string]any{
 		"unit_id": float64(1),
 		"unit": map[string]any{
-			"method":  "POST",
-			"path":    "/auth/login",
-			"tag":     "认证",
-			"name":    "用户登录",
-			"params":  "[]",
+			"method":   "POST",
+			"path":     "/auth/login",
+			"tag":      "认证",
+			"name":     "用户登录",
+			"params":   "[]",
 			"security": "null",
 		},
 	})
 	nodeCfg(t, tree.Nodes["n_token_valid"], map[string]any{
 		"unit_id": float64(40),
 		"unit": map[string]any{
-			"method":  "GET",
-			"path":    "/providers",
-			"tag":     "LLM Provider",
-			"name":    "列出 LLM Provider",
-			"params":  "[]",
+			"method":   "GET",
+			"path":     "/providers",
+			"tag":      "LLM Provider",
+			"name":     "列出 LLM Provider",
+			"params":   "[]",
 			"security": "[{\"BearerAuth\":[]}]",
 		},
 	})
 	nodeCfg(t, tree.Nodes["n_logout"], map[string]any{
 		"unit_id": float64(7),
 		"unit": map[string]any{
-			"method":  "POST",
-			"path":    "/auth/logout",
-			"tag":     "认证",
-			"name":    "退出登录",
-			"params":  "[]",
+			"method":   "POST",
+			"path":     "/auth/logout",
+			"tag":      "认证",
+			"name":     "退出登录",
+			"params":   "[]",
 			"security": "[{\"BearerAuth\":[]}]",
 		},
 	})
 	nodeCfg(t, tree.Nodes["n_token_invalid"], map[string]any{
 		"unit_id": float64(40),
 		"unit": map[string]any{
-			"method":  "GET",
-			"path":    "/providers",
-			"tag":     "LLM Provider",
-			"name":    "列出 LLM Provider",
-			"params":  "[]",
+			"method":   "GET",
+			"path":     "/providers",
+			"tag":      "LLM Provider",
+			"name":     "列出 LLM Provider",
+			"params":   "[]",
 			"security": "[{\"BearerAuth\":[]}]",
 		},
 	})
 	nodeCfg(t, tree.Nodes["n_register"], map[string]any{
 		"unit_id": float64(19),
 		"unit": map[string]any{
-			"method":  "POST",
-			"path":    "/auth/register",
-			"tag":     "认证",
-			"name":    "注册账号",
-			"params":  "[]",
+			"method":   "POST",
+			"path":     "/auth/register",
+			"tag":      "认证",
+			"name":     "注册账号",
+			"params":   "[]",
 			"security": "null",
 		},
 	})
@@ -1071,4 +1071,67 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// 断言期望值类型化解析 + 类型感知比较。
+func TestAssertionTypedCompare(t *testing.T) {
+	cases := []struct {
+		name     string
+		actual   any
+		expected any
+		op       string
+		want     bool
+	}{
+		{"数字字面量 vs 数字", 200, "200", "eq", true},
+		{"数字 vs 数字字符串", "200", "200", "eq", true},
+		{"数字与字符串精确不等(带引号)", 200, `"200"`, "eq", false},
+		{"数字不等于", 200, "201", "ne", true},
+		{"布尔字面量", true, "true", "eq", true},
+		{"布尔 false", false, "false", "eq", true},
+		{"null 严格判空", nil, "null", "eq", true},
+		{"null 不匹配非空", "x", "null", "eq", false},
+		{"字符串裸 token", "abc", "abc", "eq", true},
+		{"数组深度相等", []any{1.0, 2.0}, "[1,2]", "eq", true},
+		{"数组不等", []any{1.0, 2.0}, "[1,3]", "eq", false},
+		{"对象深度相等", map[string]any{"a": float64(1)}, `{"a":1}`, "eq", true},
+		{"gt 数字字符串归一", 10, "2", "gt", true},
+		{"gt 字符串词典(非数字)", "b", "a", "gt", true},
+		{"contains 子串", "hello world", "world", "contains", true},
+		{"contains 数组元素", []any{"a", float64(200)}, "200", "contains", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := &engine{}
+			got, err := e.evalAssertion(Assertion{Field: "f", Operator: c.op, Expected: c.expected}, map[string]any{"f": c.actual})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != c.want {
+				t.Fatalf("want %v, got %v", c.want, got)
+			}
+		})
+	}
+}
+
+// normalizeExpected 解析行为单元测试。
+func TestNormalizeExpected(t *testing.T) {
+	n := func(v any) any { return normalizeExpected(v) }
+	if got := n("200"); got != float64(200) {
+		t.Fatalf("数字解析失败: %#v", got)
+	}
+	if got := n("true"); got != true {
+		t.Fatalf("布尔解析失败: %#v", got)
+	}
+	if got := n("null"); got != nil {
+		t.Fatalf("null 解析失败: %#v", got)
+	}
+	if got := n("abc"); got != "abc" {
+		t.Fatalf("裸字符串应原样保留: %#v", got)
+	}
+	if got := n(`"abc"`); got != "abc" {
+		t.Fatalf("带引号字符串解析失败: %#v", got)
+	}
+	if got := n("2500"); got != float64(2500) {
+		t.Fatalf("空串应保留: %#v", got)
+	}
 }
