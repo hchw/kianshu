@@ -75,7 +75,7 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 		return nil, err
 	}
 	toolCtx := &ToolContext{DB: db, TestSetID: tsID, Tree: tree}
-	req := newAgentCompletionRequest(provider, append([]openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(ModeGenerate, d.SystemPrompt))}}, history...))
+	req := newAgentCompletionRequest(provider, append([]openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(ModeGenerate, d.SystemPrompt))}}, history...), FlowThinking(db, flowID))
 	req.Tools = toolSchemas()
 	req.Messages = append(req.Messages, openai.Message{Role: "user", Content: strPtr(contextMsg)})
 
@@ -92,6 +92,8 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 		for retry := 0; retry < 3; retry++ {
 			resp, lastErr = generateComplete(ctx, provider, req, func(text string) {
 				h.emit(Event{Kind: EventKindText, Round: round, Text: text})
+			}, func(text string) {
+				h.emit(Event{Kind: EventKindReasoning, Round: round, Text: text})
 			})
 			if lastErr == nil {
 				break
@@ -169,7 +171,7 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 	if err := SnapshotAPINodes(db, tree); err != nil {
 		return nil, err
 	}
-	if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt); err != nil {
+	if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt, d.Thinking); err != nil {
 		return nil, err
 	}
 	return RunAgent(ctx, db, flowID, userID, AgentOptions{
@@ -185,9 +187,9 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 // generateComplete calls the provider for the analysis phase, preferring
 // streaming when available so the model's feedback reaches the client in real
 // time.
-func generateComplete(ctx context.Context, p ChatProvider, req openai.CompletionRequest, onText func(string)) (*openai.CompletionResponse, error) {
+func generateComplete(ctx context.Context, p ChatProvider, req openai.CompletionRequest, onText func(string), onReasoning openai.ReasoningCallback) (*openai.CompletionResponse, error) {
 	if sp, ok := p.(StreamingProvider); ok {
-		return sp.StreamChatCompletion(ctx, p, req, onText)
+		return sp.StreamChatCompletion(ctx, p, req, onText, onReasoning)
 	}
 	return p.ChatCompletion(ctx, p, req)
 }
@@ -243,7 +245,7 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 	if err != nil {
 		return nil, err
 	}
-	req := newAgentCompletionRequest(provider, append([]openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(ModeGenerate, d.SystemPrompt))}}, history...))
+	req := newAgentCompletionRequest(provider, append([]openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(ModeGenerate, d.SystemPrompt))}}, history...), FlowThinking(db, flowID))
 	req.Tools = toolSchemas()
 
 	var lines []string

@@ -60,18 +60,18 @@ type Import struct {
 
 // Provider is a user-scoped OpenAI-compatible LLM provider.
 type Provider struct {
-	ID        uint      `gorm:"primarykey" json:"id" example:"1"`
-	UserID    uint      `gorm:"index;not null" json:"user_id" example:"1"`
-	Name      string    `gorm:"size:128;not null" json:"name" example:"我的 OpenAI"`
-	BaseURL   string    `gorm:"size:255;not null" json:"base_url" example:"https://api.openai.com"`
-	APIKeyEnc string    `gorm:"size:1024" json:"-"`
-	Model     string    `gorm:"size:128" json:"model" example:"gpt-4"`
-	Enabled   bool      `json:"enabled" example:"true"`
+	ID        uint   `gorm:"primarykey" json:"id" example:"1"`
+	UserID    uint   `gorm:"index;not null" json:"user_id" example:"1"`
+	Name      string `gorm:"size:128;not null" json:"name" example:"我的 OpenAI"`
+	BaseURL   string `gorm:"size:255;not null" json:"base_url" example:"https://api.openai.com"`
+	APIKeyEnc string `gorm:"size:1024" json:"-"`
+	Model     string `gorm:"size:128" json:"model" example:"gpt-4"`
+	Enabled   bool   `json:"enabled" example:"true"`
 	// StrictContent 为 true 时,client 会把 content 为 null 的消息改成空串发出,
 	// 兼容 ollama/vLLM 等拒绝 null content 的严格 OpenAI 兼容服务端。
-	StrictContent bool `gorm:"default:false" json:"strict_content" example:"false"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	StrictContent bool      `gorm:"default:false" json:"strict_content" example:"false"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // TestUnit is one interface derived from a swagger import. Deletion is soft
@@ -115,6 +115,7 @@ type FlowDraft struct {
 	Name         string    `gorm:"size:128" json:"name" example:"我的测试流"`
 	Tree         string    `gorm:"type:text" json:"tree"`
 	SystemPrompt string    `gorm:"type:text" json:"system_prompt"`
+	Thinking     string    `gorm:"size:32;default:disabled" json:"thinking"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

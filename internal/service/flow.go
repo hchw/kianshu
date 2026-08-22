@@ -53,8 +53,8 @@ func GetDraft(db *gorm.DB, flowID uint) (*model.FlowDraft, error) {
 // UpdateDraft replaces the working draft with a new whole-tree snapshot and,
 // when systemPrompt is non-nil, the flow-scoped context document. A nil
 // systemPrompt leaves the existing document untouched (partial update); an
-// explicit empty string clears it.
-func UpdateDraft(db *gorm.DB, flowID uint, name, treeJSON string, systemPrompt *string) (*model.FlowDraft, error) {
+// explicit empty string clears it. 当 thinking 非空时一并写入深度思考偏好。
+func UpdateDraft(db *gorm.DB, flowID uint, name, treeJSON string, systemPrompt *string, thinking string) (*model.FlowDraft, error) {
 	tree, err := flow.ParseTree(treeJSON)
 	if err != nil {
 		return nil, err
@@ -72,10 +72,34 @@ func UpdateDraft(db *gorm.DB, flowID uint, name, treeJSON string, systemPrompt *
 	if systemPrompt != nil {
 		d.SystemPrompt = *systemPrompt
 	}
+	if thinking != "" {
+		d.Thinking = thinking
+	}
 	if err := db.Save(d).Error; err != nil {
 		return nil, err
 	}
 	return d, nil
+}
+
+// UpdateFlowThinking 更新流的深度思考偏好(thinking 列),不动 tree/文档。
+// 仅在用户于对话框中切换深度思考时调用,把偏好持久化到草稿行。
+func UpdateFlowThinking(db *gorm.DB, flowID uint, thinking string) error {
+	d, err := GetDraft(db, flowID)
+	if err != nil {
+		return err
+	}
+	d.Thinking = thinking
+	return db.Save(d).Error
+}
+
+// FlowThinking 读取流在数据库中持久化的深度思考级别(thinking 列),作为
+// agent 提交时的唯一事实来源。空值返回 "disabled"。
+func FlowThinking(db *gorm.DB, flowID uint) string {
+	d, err := GetDraft(db, flowID)
+	if err != nil || d.Thinking == "" {
+		return "disabled"
+	}
+	return d.Thinking
 }
 
 // UpdateFlowDoc 更新流的系统提示词文档（system_prompt 列）。

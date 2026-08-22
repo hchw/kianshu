@@ -76,6 +76,9 @@ definitions:
       provider_id:
         example: 1
         type: integer
+      thinking:
+        example: high
+        type: string
     required:
     - answers
     - provider_id
@@ -113,6 +116,9 @@ definitions:
         type: array
       system_prompt:
         example: 本流对接 XX 云签名规范
+        type: string
+      thinking:
+        example: high
         type: string
     required:
     - instruction
@@ -519,6 +525,8 @@ definitions:
         example: 我的测试流
         type: string
       system_prompt:
+        type: string
+      thinking:
         type: string
       tree:
         type: string

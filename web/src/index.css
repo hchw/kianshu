@@ -1122,6 +1122,27 @@ h3 {
   color: var(--text);
 }
 
+/* 深度思考折叠块（展示-跳，不回传给模型） */
+.chat-reasoning {
+  margin: 4px 0;
+  border-left: 3px solid var(--muted);
+  padding-left: 8px;
+  color: var(--muted);
+  font-size: var(--fs-11);
+}
+
+.chat-reasoning summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+}
+
+.chat-reasoning .chat-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 4px;
+}
+
 /* 流式输出光标闪烁 */
 .chat-msg.live .chat-text::after {
   content: '▌';

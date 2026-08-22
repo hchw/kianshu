@@ -297,7 +297,7 @@ func (s *Server) handleGetDraft(c *gin.Context) {
 		writeErr(c, http.StatusNotFound, "草稿不存在")
 		return
 	}
-	writeJSON(c, http.StatusOK, gin.H{"flow_id": flowID, "test_set_id": ts, "name": d.Name, "tree": d.Tree, "system_prompt": d.SystemPrompt})
+	writeJSON(c, http.StatusOK, gin.H{"flow_id": flowID, "test_set_id": ts, "name": d.Name, "tree": d.Tree, "system_prompt": d.SystemPrompt, "thinking": d.Thinking})
 }
 
 // handleUpdateDraft saves a flow's working draft. Each save creates a new
@@ -325,6 +325,7 @@ func (s *Server) handleUpdateDraft(c *gin.Context) {
 		Name         string          `json:"name"`
 		Tree         json.RawMessage `json:"tree"`
 		SystemPrompt *string         `json:"system_prompt"`
+		Thinking     string          `json:"thinking"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.Tree) == 0 {
 		writeErr(c, http.StatusBadRequest, "请求体需包含 tree")
@@ -335,7 +336,7 @@ func (s *Server) handleUpdateDraft(c *gin.Context) {
 		writeErr(c, http.StatusBadRequest, "tree 格式不合法")
 		return
 	}
-	d, err := service.UpdateDraft(s.DB, flowID, req.Name, treeJSON, req.SystemPrompt)
+	d, err := service.UpdateDraft(s.DB, flowID, req.Name, treeJSON, req.SystemPrompt, req.Thinking)
 	if err != nil {
 		if errors.Is(err, service.ErrFlowValidation) {
 			writeErr(c, http.StatusBadRequest, err.Error())
@@ -345,6 +346,26 @@ func (s *Server) handleUpdateDraft(c *gin.Context) {
 		return
 	}
 	writeJSON(c, http.StatusOK, d)
+}
+
+// handleUpdateFlowThinking 持久化流的深度思考偏好(thinking 列),不动 tree/文档。
+func (s *Server) handleUpdateFlowThinking(c *gin.Context) {
+	flowID, _, ok := s.flowEditable(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Thinking string `json:"thinking"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeErr(c, http.StatusBadRequest, "请求体需包含 thinking")
+		return
+	}
+	if err := service.UpdateFlowThinking(s.DB, flowID, req.Thinking); err != nil {
+		writeErr(c, http.StatusInternalServerError, "保存深度思考偏好失败")
+		return
+	}
+	writeJSON(c, http.StatusOK, gin.H{"ok": true, "thinking": req.Thinking})
 }
 
 // treePayload accepts a tree either as an inline JSON object or as a JSON

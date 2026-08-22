@@ -117,6 +117,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/flow/flows/:flowID/duplicate", s.handleDuplicateFlow)
 		auth.PATCH("/flow/flows/:flowID", s.handleRenameFlow)
 		auth.PUT("/flow/flows/:flowID/draft", s.handleUpdateDraft)
+		auth.PATCH("/flow/flows/:flowID/thinking", s.handleUpdateFlowThinking)
 		auth.POST("/flow/flows/:flowID/draft/validate", s.handleValidateDraft)
 		auth.POST("/flow/flows/:flowID/draft/trial-run", s.handleTrialRun)
 		auth.POST("/flow/flows/:flowID/versions", s.handleSaveEnable)

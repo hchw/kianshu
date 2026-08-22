@@ -39,6 +39,9 @@ const (
 	EventKindRound = "round"
 	// EventKindText carries one incremental chunk of the assistant's reply.
 	EventKindText = "text"
+	// EventKindReasoning carries one incremental chunk of the model's
+	// thinking/reasoning content (display-only, not fed back to the model).
+	EventKindReasoning = "reasoning"
 	// EventKindTool carries one tool invocation and its result (default kind).
 	EventKindTool = "tool"
 )
@@ -99,17 +102,36 @@ type AgentResult struct {
 // non-streaming path.
 type StreamingProvider interface {
 	ChatProvider
-	StreamChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest, onChunk openai.StreamCallback) (*openai.CompletionResponse, error)
+	StreamChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest, onChunk openai.StreamCallback, onReasoning openai.ReasoningCallback) (*openai.CompletionResponse, error)
 }
 
-// newAgentCompletionRequest builds a chat request for agent rounds with deep
-// thinking (chain-of-thought) disabled。provider 的 strict-content 设置
+// ThinkingUnset 是不设置 thinking 配置的哨兵值：选中后请求体省略 thinking
+// 字段，交由 provider 自身默认行为决定是否深度思考。区别于 "disabled"
+// （显式要求关闭）。
+const ThinkingUnset = "unset"
+
+// thinkingMode normalizes a user-supplied reasoning mode. Empty string and
+// "disabled" both turn chain-of-thought off; any other value is passed through
+// (low/high/max or a provider-specific custom token).
+func thinkingMode(t string) string {
+	if strings.TrimSpace(t) == "" {
+		return "disabled"
+	}
+	return t
+}
+
+// newAgentCompletionRequest builds a chat request for agent rounds with the
+// given reasoning mode。thinking 取值可为 "disabled"/"low"/"high"/"max"
+// 或任意自定义串;空串与 "disabled" 等价(关闭思维链);ThinkingUnset 时省略
+// thinking 字段(交由 provider 默认)。provider 的 strict-content 设置
 // (ollama/vLLM) 通过 ForceContentString 生效。
-func newAgentCompletionRequest(provider openai.Provider, messages []openai.Message) openai.CompletionRequest {
+func newAgentCompletionRequest(provider openai.Provider, messages []openai.Message, thinking string) openai.CompletionRequest {
 	req := openai.CompletionRequest{
 		Model:    provider.GetModel(),
 		Messages: messages,
-		Thinking: &openai.ThinkingConfig{Type: "disabled"},
+	}
+	if t := thinkingMode(thinking); t != ThinkingUnset {
+		req.Thinking = &openai.ThinkingConfig{Type: t}
 	}
 	if provider.GetStrictContent() {
 		req.ForceContentString = true
@@ -398,7 +420,8 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 	}
 
 	// Rebuild the message list for this submission: system + prior history + user.
-	req := newAgentCompletionRequest(opt.Provider, []openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(opt.Mode, d.SystemPrompt))}})
+	// thinking 以数据库持久化的值为准(流级偏好),不依赖调用方传参。
+	req := newAgentCompletionRequest(opt.Provider, []openai.Message{{Role: "system", Content: strPtr(flowSystemPrompt(opt.Mode, d.SystemPrompt))}}, FlowThinking(db, flowID))
 	if len(opt.PresetMessages) > 0 {
 		req.Messages = append(req.Messages, opt.PresetMessages...)
 	} else {
@@ -435,6 +458,10 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 			resp, lastErr = opt.complete(ctx, opt.Provider, req, func(text string) {
 				if opt.Emit != nil {
 					opt.Emit(Event{Kind: EventKindText, Round: round, Text: text})
+				}
+			}, func(text string) {
+				if opt.Emit != nil {
+					opt.Emit(Event{Kind: EventKindReasoning, Round: round, Text: text})
 				}
 			})
 			if lastErr == nil {
@@ -547,7 +574,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 			if err := SnapshotAPINodes(db, tree); err != nil {
 				return nil, err
 			}
-			if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt); err != nil {
+			if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt, d.Thinking); err != nil {
 				return nil, err
 			}
 			res.Message = "已达 50 轮工具调用上限,已暂停。你可以选择继续生成或停止。"
@@ -571,17 +598,18 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 	if err := SnapshotAPINodes(db, tree); err != nil {
 		return nil, err
 	}
-	if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt); err != nil {
+	if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt, d.Thinking); err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
 // complete calls the provider, preferring streaming when available so the
-// assistant's reply reaches the client token by token via onText.
-func (opt AgentOptions) complete(ctx context.Context, p ChatProvider, req openai.CompletionRequest, onText func(string)) (*openai.CompletionResponse, error) {
+// assistant's reply reaches the client token by token via onText. 若提供
+// onReasoning,思考过程增量(reasoning_content)会实时回调。
+func (opt AgentOptions) complete(ctx context.Context, p ChatProvider, req openai.CompletionRequest, onText func(string), onReasoning openai.ReasoningCallback) (*openai.CompletionResponse, error) {
 	if sp, ok := p.(StreamingProvider); ok {
-		return sp.StreamChatCompletion(ctx, p, req, onText)
+		return sp.StreamChatCompletion(ctx, p, req, onText, onReasoning)
 	}
 	return p.ChatCompletion(ctx, p, req)
 }
