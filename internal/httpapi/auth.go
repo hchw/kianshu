@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github/hchw/kianshu/internal/model"
 
@@ -99,6 +100,50 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 	writeJSON(c, http.StatusOK, gin.H{"token": token, "id": u.ID, "username": u.Username})
+}
+
+// refreshResp 是令牌刷新成功后的返回。
+type refreshResp struct {
+	Token     string    `json:"token" example:"6f2b0c9de4a51f8c..."`       // 新签发的令牌
+	ExpiresAt time.Time `json:"expires_at" example:"2025-01-01T00:00:00Z"` // 新令牌过期时间
+}
+
+// handleRefreshToken 用当前有效的会话令牌换取一个新令牌。
+//
+//	@Summary	刷新令牌
+//	@Description	使用当前请求携带的有效会话令牌换取一个新令牌并延长会话有效期,旧令牌随即失效。需携带 `Authorization: Bearer <token>`。
+//	@Tags		认证
+//	@Accept		json
+//	@Produce	json
+//	@Security	BearerAuth
+//	@Success	200		{object}	refreshResp	"刷新成功,返回新令牌"
+//	@Failure	401		{object}	errorResp	"未登录或会话已失效"
+//	@Failure	500		{object}	errorResp	"签发新令牌失败"
+//	@Router		/auth/refresh [post]
+func (s *Server) handleRefreshToken(c *gin.Context) {
+	userID, ok := userIDOf(c)
+	if !ok {
+		writeErr(c, http.StatusUnauthorized, "未登录或会话已失效")
+		return
+	}
+	token := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+	// 使旧会话令牌作废。
+	s.DB.Where("token_hash = ?", hashToken(token)).Delete(&model.Session{})
+	newTok, err := newToken()
+	if err != nil {
+		writeErr(c, http.StatusInternalServerError, "签发新令牌失败")
+		return
+	}
+	ns := model.Session{
+		TokenHash: hashToken(newTok),
+		UserID:    userID,
+		ExpiresAt: now().Add(s.Cfg.SessionTTL),
+	}
+	if err := s.DB.Create(&ns).Error; err != nil {
+		writeErr(c, http.StatusInternalServerError, "签发新令牌失败")
+		return
+	}
+	writeJSON(c, http.StatusOK, refreshResp{Token: newTok, ExpiresAt: ns.ExpiresAt})
 }
 
 // handleLogout revokes the current session token.

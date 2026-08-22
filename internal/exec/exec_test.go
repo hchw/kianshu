@@ -1135,3 +1135,277 @@ func TestNormalizeExpected(t *testing.T) {
 		t.Fatalf("空串应保留: %#v", got)
 	}
 }
+
+// TestAPICustomHeaders 验证 api 节点的 config.headers:字面量直接写入,
+// '=' 前缀按 JSONata 对当前输入求值,且自定义头覆盖同名自动认证头。
+func TestAPICustomHeaders(t *testing.T) {
+	var got APICall
+	tree := treeOf(map[string]*flow.Node{
+		"n1": flow.NewNode("n1", flow.NodeStart),
+		"n2": flow.NewNode("n2", flow.NodeAPI),
+	})
+	nodeCfg(t, tree.Nodes["n2"], map[string]any{
+		"unit": map[string]any{"method": "POST", "path": "/llm"},
+		"headers": map[string]any{
+			"Content-Type":  "application/json",
+			"OpenAI-Org":    "org-123",
+			"X-Token-Ref":   "=rt",
+			"X-Count":       float64(3),
+			"Authorization": "Bearer override",
+		},
+	})
+	// 认证输入 auth 会被自动转成 Authorization,自定义头应覆盖它。
+	tree.Nodes["n2"].Inputs = map[string]flow.IOKey{
+		"auth": {Type: flow.IOTypePrimitive},
+		"rt":   {Type: flow.IOTypePrimitive},
+	}
+	tree.AddChild("n1", "n2")
+	res, err := Run(context.Background(), tree, Options{
+		Host:        "http://x",
+		StartParams: map[string]any{"auth": "abc123", "rt": "resolved-token"},
+		CallAPI: func(call APICall) (*APIResponse, error) {
+			got = call
+			return &APIResponse{StatusCode: 200, Body: map[string]any{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != StatusOK {
+		for id, r := range res.Results {
+			t.Logf("node %s: status=%s err=%v", id, r.Status, r.Error)
+		}
+		t.Fatalf("status = %s", res.Status)
+	}
+	want := map[string]string{
+		"Content-Type":  "application/json",
+		"OpenAI-Org":    "org-123",
+		"X-Token-Ref":   "resolved-token",
+		"X-Count":       "3",
+		"Authorization": "Bearer override",
+	}
+	for k, v := range want {
+		if got.Headers[k] != v {
+			t.Fatalf("header %s = %q, want %q (all: %v)", k, got.Headers[k], v, got.Headers)
+		}
+	}
+}
+
+// callAPINode runs a single api node and returns the captured request.
+// inputs lists the node's input keys; start provides runtime values for them.
+func callAPINode(t *testing.T, opt struct {
+	method     string
+	path       string
+	security   string
+	paramsJSON string
+	params     map[string]any // node config.params (explicit params)
+	headers    map[string]any // node config.headers (custom headers)
+	inputs     []string
+	start      map[string]any
+}) APICall {
+	t.Helper()
+	var got APICall
+	tree := treeOf(map[string]*flow.Node{
+		"n1": flow.NewNode("n1", flow.NodeStart),
+		"n2": flow.NewNode("n2", flow.NodeAPI),
+	})
+	unit := map[string]any{"method": opt.method, "path": opt.path}
+	if opt.security != "" {
+		unit["security"] = opt.security
+	}
+	if opt.paramsJSON != "" {
+		unit["params"] = opt.paramsJSON
+	}
+	nodeCfg(t, tree.Nodes["n2"], map[string]any{"unit": unit, "params": opt.params, "headers": opt.headers})
+	if len(opt.inputs) > 0 {
+		io := map[string]flow.IOKey{}
+		for _, k := range opt.inputs {
+			io[k] = flow.IOKey{Type: flow.IOTypePrimitive}
+		}
+		tree.Nodes["n2"].Inputs = io
+	}
+	tree.AddChild("n1", "n2")
+	res, err := Run(context.Background(), tree, Options{
+		Host:        "http://x",
+		StartParams: opt.start,
+		CallAPI: func(c APICall) (*APIResponse, error) {
+			got = c
+			return &APIResponse{StatusCode: 200, Body: map[string]any{"ok": true}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != StatusOK {
+		t.Fatalf("status = %s", res.Status)
+	}
+	return got
+}
+
+func TestAPIParamInHeaderRouting(t *testing.T) {
+	const signParams = `[{"name":"X-Timestamp","in":"header"},{"name":"X-Nonce","in":"header"},{"name":"X-Signature","in":"header"}]`
+	got := callAPINode(t, struct {
+		method     string
+		path       string
+		security   string
+		paramsJSON string
+		params     map[string]any
+		headers    map[string]any
+		inputs     []string
+		start      map[string]any
+	}{
+		method: "POST", path: "/utils/sign", paramsJSON: signParams,
+		inputs: []string{"X-Timestamp", "X-Nonce", "X-Signature"},
+		start:  map[string]any{"X-Timestamp": float64(1700000000), "X-Nonce": "abc", "X-Signature": "deadbeef"},
+	})
+	// 三个 in:header 参数必须作为请求头送达,不得塞进 body。
+	if got.Headers["X-Timestamp"] != "1700000000" {
+		t.Fatalf("X-Timestamp header = %q, want numeric string (all: %v)", got.Headers["X-Timestamp"], got.Headers)
+	}
+	if got.Headers["X-Nonce"] != "abc" || got.Headers["X-Signature"] != "deadbeef" {
+		t.Fatalf("sign headers = %v", got.Headers)
+	}
+	if b, ok := got.Body.(map[string]any); ok {
+		if _, has := b["X-Timestamp"]; has {
+			t.Fatalf("in:header param must not be routed into body: %v", b)
+		}
+	}
+}
+
+func TestAPIParamInQueryAndBody(t *testing.T) {
+	const paramsJSON = `[{"name":"q","in":"query"},{"name":"payload","in":"body"}]`
+	got := callAPINode(t, struct {
+		method     string
+		path       string
+		security   string
+		paramsJSON string
+		params     map[string]any
+		headers    map[string]any
+		inputs     []string
+		start      map[string]any
+	}{
+		method: "POST", path: "/search", paramsJSON: paramsJSON,
+		inputs: []string{"q", "payload"},
+		start:  map[string]any{"q": "golang", "payload": map[string]any{"a": 1}},
+	})
+	if got.Query["q"] != "golang" {
+		t.Fatalf("in:query param = %v, want query", got.Query)
+	}
+	if b, ok := got.Body.(map[string]any); ok {
+		if b["payload"] == nil {
+			t.Fatalf("in:body param missing: %v", got.Body)
+		}
+	} else {
+		t.Fatalf("body = %v", got.Body)
+	}
+}
+
+func TestAPIParamInCoexistWithAuthAndSignatureOnly(t *testing.T) {
+	const signParams = `[{"name":"X-Timestamp","in":"header"},{"name":"X-Nonce","in":"header"},{"name":"X-Signature","in":"header"}]`
+	// 并存:auth 输入派生 Authorization,同时 X-* 走 in:header,互不覆盖。
+	got := callAPINode(t, struct {
+		method     string
+		path       string
+		security   string
+		paramsJSON string
+		params     map[string]any
+		headers    map[string]any
+		inputs     []string
+		start      map[string]any
+	}{
+		method: "POST", path: "/utils/sign", security: `[{"BearerAuth":[]}]`, paramsJSON: signParams,
+		inputs: []string{"auth", "X-Timestamp", "X-Nonce", "X-Signature"},
+		start:  map[string]any{"auth": "tok", "X-Timestamp": float64(1), "X-Nonce": "a", "X-Signature": "b"},
+	})
+	if got.Headers["Authorization"] != "Bearer tok" {
+		t.Fatalf("auth header = %q, want Bearer tok (all: %v)", got.Headers["Authorization"], got.Headers)
+	}
+	for _, h := range []string{"X-Timestamp", "X-Nonce", "X-Signature"} {
+		if got.Headers[h] == "" {
+			t.Fatalf("coexist header %s missing: %v", h, got.Headers)
+		}
+	}
+	// 仅签名:无认证输入,只有 in:header,不得产生任何认证头。
+	got2 := callAPINode(t, struct {
+		method     string
+		path       string
+		security   string
+		paramsJSON string
+		params     map[string]any
+		headers    map[string]any
+		inputs     []string
+		start      map[string]any
+	}{
+		method: "POST", path: "/utils/sign", paramsJSON: signParams,
+		inputs: []string{"X-Timestamp", "X-Nonce", "X-Signature"},
+		start:  map[string]any{"X-Timestamp": float64(1), "X-Nonce": "a", "X-Signature": "b"},
+	})
+	if _, has := got2.Headers["Authorization"]; has {
+		t.Fatalf("signature-only must not send auth header: %v", got2.Headers)
+	}
+	if got2.Headers["X-Signature"] != "b" {
+		t.Fatalf("signature-only headers = %v", got2.Headers)
+	}
+}
+
+func TestAPIParamInSameKeyConflict(t *testing.T) {
+	// 某键既是 in:header 参数又匹配认证键名(Authorization):以声明位置为准,
+	// 按原值作为请求头,不重复走 Bearer 前缀;config.headers 最终覆盖。
+	got := callAPINode(t, struct {
+		method     string
+		path       string
+		security   string
+		paramsJSON string
+		params     map[string]any
+		headers    map[string]any
+		inputs     []string
+		start      map[string]any
+	}{
+		method: "GET", path: "/x", paramsJSON: `[{"name":"Authorization","in":"header"}]`,
+		inputs: []string{"Authorization"},
+		start:  map[string]any{"Authorization": "raw-token"},
+	})
+	if got.Headers["Authorization"] != "raw-token" {
+		t.Fatalf("same-key Authorization should route as-is, got %q (all: %v)", got.Headers["Authorization"], got.Headers)
+	}
+	// config.headers 最终覆盖同键。
+	got2 := callAPINode(t, struct {
+		method     string
+		path       string
+		security   string
+		paramsJSON string
+		params     map[string]any
+		headers    map[string]any
+		inputs     []string
+		start      map[string]any
+	}{
+		method: "GET", path: "/x", paramsJSON: `[{"name":"Authorization","in":"header"}]`,
+		inputs:  []string{"Authorization"},
+		start:   map[string]any{"Authorization": "raw"},
+		headers: map[string]any{"Authorization": "override"},
+	})
+	if got2.Headers["Authorization"] != "override" {
+		t.Fatalf("config.headers should override same key: %v", got2.Headers)
+	}
+}
+
+func TestAPIParamInUndeclaredFallsBackToHeuristic(t *testing.T) {
+	// 未在 params 声明的 isAuthKey 键(auth)回退启发式 → Bearer 认证头。
+	got := callAPINode(t, struct {
+		method     string
+		path       string
+		security   string
+		paramsJSON string
+		params     map[string]any
+		headers    map[string]any
+		inputs     []string
+		start      map[string]any
+	}{
+		method: "POST", path: "/utils/sign", security: `[{"BearerAuth":[]}]`,
+		inputs: []string{"auth"},
+		start:  map[string]any{"auth": "tok"},
+	})
+	if got.Headers["Authorization"] != "Bearer tok" {
+		t.Fatalf("undeclared auth key should fall back to Bearer: %v", got.Headers)
+	}
+}

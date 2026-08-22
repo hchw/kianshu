@@ -436,6 +436,50 @@ func TestSoftDeletedUnit(t *testing.T) {
 	}
 }
 
+// TestAPIHeaders 验证 api 节点的自定义请求头配置校验:'=' 前缀需为合法
+// JSONata 表达式,字面量任意;非法表达式应报 header_jsonata_invalid。
+func TestAPIHeaders(t *testing.T) {
+	tree := helperTree(t, func(tree *Tree) {
+		tree.Start = "s"
+		add(tree, "s", NodeStart)
+		api := add(tree, "api", NodeAPI)
+		api.Config = mustConfig(map[string]any{
+			"unit_id": 1,
+			"headers": map[string]any{
+				"Content-Type": "application/json",
+				"X-Ref":        "=token",
+				"X-Bad":        "=broken ((",
+			},
+		})
+		link(tree, "s", "api")
+	})
+	res := Validate(tree, ValidatorOptions{})
+	if !hasCode(res, "api.header_jsonata_invalid") {
+		t.Fatalf("expected invalid-expr header error, got %+v", res.Errors)
+	}
+}
+
+func TestAPIHeadersValid(t *testing.T) {
+	tree := helperTree(t, func(tree *Tree) {
+		tree.Start = "s"
+		add(tree, "s", NodeStart)
+		api := add(tree, "api", NodeAPI)
+		api.Config = mustConfig(map[string]any{
+			"unit_id": 1,
+			"headers": map[string]any{
+				"Content-Type": "application/json",
+				"X-Ref":        "=token",
+				"X-Num":        float64(3),
+			},
+		})
+		link(tree, "s", "api")
+	})
+	res := Validate(tree, ValidatorOptions{})
+	if hasCode(res, "api.header_jsonata_invalid") || len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %+v", res.Errors)
+	}
+}
+
 func mustConfig(v any) []byte {
 	b, err := MarshalConfig(v)
 	if err != nil {

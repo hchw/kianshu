@@ -11,13 +11,20 @@ var ErrMissingEncKey = errors.New("缺少 KS_ENC_KEY 环境变量(32 字节 AES 
 
 // Config holds runtime configuration loaded from environment variables.
 type Config struct {
-	Addr       string // HTTP listen address
-	DBDriver   string // sqlite | mysql | postgres
-	DSN        string // GORM data source name
-	SessionTTL time.Duration
-	EncKey     []byte // AES-GCM key for provider api_key encryption (32 bytes)
-	DBPath     string // sqlite file path (used when DBDriver=sqlite)
+	Addr        string // HTTP listen address
+	DBDriver    string // sqlite | mysql | postgres
+	DSN         string // GORM data source name
+	SessionTTL  time.Duration
+	EncKey      []byte        // AES-GCM key for provider api_key encryption (32 bytes)
+	DBPath      string        // sqlite file path (used when DBDriver=sqlite)
 	ExecTimeout time.Duration // bounds every HTTP call and whole-run execution
+	// LLMTimeout bounds a single LLM request (connect + send + stream read).
+	// Too short a value truncates long streaming responses mid-body.
+	LLMTimeout time.Duration
+	// SignSecret is the shared HMAC key used by the signature-auth middleware
+	// (KS_SIGN_SECRET). Clients must know it to sign requests to protected
+	// endpoints. Empty means every signed request fails verification.
+	SignSecret string
 }
 
 // Load reads configuration from environment. Returns error when required
@@ -40,6 +47,8 @@ func Load() (*Config, error) {
 		EncKey:      []byte(encKey),
 		DBPath:      dsn,
 		ExecTimeout: time.Duration(envInt("KS_EXEC_TIMEOUT", 60)) * time.Second,
+		LLMTimeout:  time.Duration(envInt("KS_LLM_TIMEOUT", 600)) * time.Second,
+		SignSecret:  env("KS_SIGN_SECRET", ""),
 	}, nil
 }
 

@@ -146,6 +146,25 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
                 }}
               />
             </label>
+            <label>
+              自定义请求头 headers (JSON: 头名 → 值)
+              <textarea
+                rows={3}
+                value={config.headers ? JSON.stringify(config.headers) : '{}'}
+                onChange={(e) => {
+                  try {
+                    setKV('headers', JSON.parse(e.target.value))
+                  } catch {
+                    /* keep last valid */
+                  }
+                }}
+              />
+            </label>
+            <div className="muted small">
+              自定义头会覆盖同名的自动认证头。值以 '=' 开头为 JSONata 表达式
+              (对当前输入求值,如 {"\"=token\""}、{"\"=$cache.x\""});否则为字面量
+              (字符串/数字/布尔)。适用于 LLM 等第三方接口的专有头(如 Content-Type、X-Api-Key)。
+            </div>
             {unit && (
               <div className="card sub mono small">
                 <div className="strong">{unit.method} {unit.path}</div>

@@ -1,3 +1,4 @@
+basePath: /api
 definitions:
   flow.Level:
     enum:
@@ -327,6 +328,17 @@ definitions:
         example: false
         type: boolean
     type: object
+  httpapi.refreshResp:
+    properties:
+      expires_at:
+        description: 新令牌过期时间
+        example: "2025-01-01T00:00:00Z"
+        type: string
+      token:
+        description: 新签发的令牌
+        example: 6f2b0c9de4a51f8c...
+        type: string
+    type: object
   httpapi.registerResp:
     properties:
       id:
@@ -364,6 +376,20 @@ definitions:
       enabled:
         example: true
         type: boolean
+    type: object
+  httpapi.signResp:
+    properties:
+      nonce:
+        description: 请求携带的 nonce(原样回显)
+        example: abc123
+        type: string
+      ok:
+        example: true
+        type: boolean
+      timestamp:
+        description: 请求携带的时间戳(原样回显)
+        example: 1730000000
+        type: integer
     type: object
   httpapi.testSetListResp:
     properties:
@@ -720,6 +746,9 @@ definitions:
     type: object
 info:
   contact: {}
+  description: 导入 Swagger/OpenAPI 文档生成测试单元；LLM 生成可编辑的树形测试流；支持试运行、不可变版本快照与定时调度。
+  title: 鉴枢 Kianshu API
+  version: "1.0"
 paths:
   /auth/login:
     post:
@@ -765,6 +794,32 @@ paths:
       security:
       - BearerAuth: []
       summary: 退出登录
+      tags:
+      - 认证
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: '使用当前请求携带的有效会话令牌换取一个新令牌并延长会话有效期,旧令牌随即失效。需携带 `Authorization: Bearer
+        <token>`。'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 刷新成功,返回新令牌
+          schema:
+            $ref: '#/definitions/httpapi.refreshResp'
+        "401":
+          description: 未登录或会话已失效
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+        "500":
+          description: 签发新令牌失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 刷新令牌
       tags:
       - 认证
   /auth/register:
@@ -2519,4 +2574,43 @@ paths:
       summary: 解析 cron 表达式
       tags:
       - 定时调度
+  /utils/sign:
+    post:
+      consumes:
+      - application/json
+      description: 登录后携带 X-Timestamp / X-Nonce / X-Signature 请求头;签名中间件用共享密钥(KS_SIGN_SECRET)对
+        METHOD、path、query、body、timestamp、nonce 组成的规范串计算 HMAC-SHA256 并校验,通过后返回成功。用于外部联调签名算法。
+      parameters:
+      - description: Unix 秒级时间戳
+        format: int64
+        in: header
+        name: X-Timestamp
+        required: true
+        type: integer
+      - description: 随机串,防重放
+        in: header
+        name: X-Nonce
+        required: true
+        type: string
+      - description: hex HMAC-SHA256 签名
+        in: header
+        name: X-Signature
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 签名校验通过
+          schema:
+            $ref: '#/definitions/httpapi.signResp'
+        "401":
+          description: 签名缺失 / 时间戳超差 / nonce 重放 / 校验失败
+          schema:
+            $ref: '#/definitions/httpapi.errorResp'
+      security:
+      - BearerAuth: []
+      summary: 测试签名鉴权
+      tags:
+      - 工具
 swagger: "2.0"
