@@ -64,6 +64,8 @@ func New(db *gorm.DB, cfg *config.Config) (*Server, error) {
 		AgentBus:  service.NewAgentEventBus(),
 		RunBus:    runBus,
 	}
+	// 单次 LLM 请求(连接+发送+流式读取)的界,防止长输出被过短的 HTTP 超时切断。
+	s.LLM.HTTP.Timeout = cfg.LLMTimeout
 	return s, nil
 }
 
@@ -92,6 +94,7 @@ func (s *Server) Routes() *gin.Engine {
 	auth.Use(s.withAuth())
 	{
 		auth.POST("/auth/logout", s.handleLogout)
+		auth.POST("/auth/refresh", s.handleRefreshToken)
 
 		auth.GET("/test-sets", s.handleListTestSets)
 		auth.POST("/test-sets", s.handleCreateTestSet)
@@ -131,7 +134,7 @@ func (s *Server) Routes() *gin.Engine {
 
 		auth.POST("/flow/flows/:flowID/agent/submit", s.handleAgentSubmit)
 		auth.GET("/flow/flows/:flowID/agent/subscribe", s.handleAgentSubscribe)
-	auth.POST("/flow/flows/:flowID/agent/subscribe", s.handleAgentSubscribe)
+		auth.POST("/flow/flows/:flowID/agent/subscribe", s.handleAgentSubscribe)
 		auth.GET("/flow/flows/:flowID/agent/session", s.handleAgentSession)
 		auth.POST("/flow/flows/:flowID/agent/resume", s.handleAgentResume)
 		auth.POST("/flow/flows/:flowID/agent/new", s.handleAgentNew)
@@ -145,6 +148,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/providers/:id/test", s.handleTestProvider)
 
 		auth.POST("/utils/cron/describe", s.handleDescribeCron)
+		auth.POST("/utils/sign", s.signAuth(), s.handleSign)
 	}
 
 	return r

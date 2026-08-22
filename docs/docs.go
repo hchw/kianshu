@@ -86,6 +86,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "使用当前请求携带的有效会话令牌换取一个新令牌并延长会话有效期,旧令牌随即失效。需携带 ` + "`" + `Authorization: Bearer \u003ctoken\u003e` + "`" + `。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "认证"
+                ],
+                "summary": "刷新令牌",
+                "responses": {
+                    "200": {
+                        "description": "刷新成功,返回新令牌",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.refreshResp"
+                        }
+                    },
+                    "401": {
+                        "description": "未登录或会话已失效",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    },
+                    "500": {
+                        "description": "签发新令牌失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/register": {
             "post": {
                 "description": "使用用户名与密码注册新账号。用户名至少 3 字符,密码至少 6 字符,用户名全局唯一。",
@@ -2814,6 +2854,64 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/utils/sign": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "登录后携带 X-Timestamp / X-Nonce / X-Signature 请求头;签名中间件用共享密钥(KS_SIGN_SECRET)对 METHOD、path、query、body、timestamp、nonce 组成的规范串计算 HMAC-SHA256 并校验,通过后返回成功。用于外部联调签名算法。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "工具"
+                ],
+                "summary": "测试签名鉴权",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "Unix 秒级时间戳",
+                        "name": "X-Timestamp",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "随机串,防重放",
+                        "name": "X-Nonce",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "hex HMAC-SHA256 签名",
+                        "name": "X-Signature",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "签名校验通过",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.signResp"
+                        }
+                    },
+                    "401": {
+                        "description": "签名缺失 / 时间戳超差 / nonce 重放 / 校验失败",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -3290,6 +3388,21 @@ const docTemplate = `{
                 }
             }
         },
+        "httpapi.refreshResp": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "description": "新令牌过期时间",
+                    "type": "string",
+                    "example": "2025-01-01T00:00:00Z"
+                },
+                "token": {
+                    "description": "新签发的令牌",
+                    "type": "string",
+                    "example": "6f2b0c9de4a51f8c..."
+                }
+            }
+        },
         "httpapi.registerResp": {
             "type": "object",
             "properties": {
@@ -3344,6 +3457,25 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean",
                     "example": true
+                }
+            }
+        },
+        "httpapi.signResp": {
+            "type": "object",
+            "properties": {
+                "nonce": {
+                    "description": "请求携带的 nonce(原样回显)",
+                    "type": "string",
+                    "example": "abc123"
+                },
+                "ok": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "timestamp": {
+                    "description": "请求携带的时间戳(原样回显)",
+                    "type": "integer",
+                    "example": 1730000000
                 }
             }
         },
@@ -3863,12 +3995,12 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "",
+	Version:          "1.0",
 	Host:             "",
-	BasePath:         "",
+	BasePath:         "/api",
 	Schemes:          []string{},
-	Title:            "",
-	Description:      "",
+	Title:            "鉴枢 Kianshu API",
+	Description:      "导入 Swagger/OpenAPI 文档生成测试单元；LLM 生成可编辑的树形测试流；支持试运行、不可变版本快照与定时调度。",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

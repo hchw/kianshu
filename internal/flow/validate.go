@@ -57,6 +57,7 @@ func Validate(t *Tree, opts ValidatorOptions) Result {
 	}
 	res.Errors = append(res.Errors, t.validateIOContracts()...)
 	res.Errors = append(res.Errors, t.validateAdapters()...)
+	res.Errors = append(res.Errors, t.validateAPIConfigs()...)
 	res.Warnings = append(res.Warnings, t.validateAdapterFuncs()...)
 	res.Errors = append(res.Errors, t.validateTryCatch()...)
 	res.Errors = append(res.Errors, t.validateLoops()...)
@@ -355,6 +356,43 @@ func (t *Tree) validateLoops() []ValidationError {
 				Message:        fmt.Sprintf("loop 输入 %s 类型为 %s,需为 array", cfg.Input, io.Type),
 				ExpectedFormat: "loop 输入键类型需为 array",
 			})
+		}
+	}
+	return errs
+}
+
+// validateAPIConfigs checks the config of every api node: the config must be
+// parseable, and the explicit headers map (值支持 '=' 前缀的 JSONata 表达式) must be
+// well-formed so header values resolve to serializable primitives.
+func (t *Tree) validateAPIConfigs() []ValidationError {
+	var errs []ValidationError
+	for id, n := range t.Nodes {
+		if n == nil || n.Type != NodeAPI {
+			continue
+		}
+		var cfg struct {
+			Headers map[string]any `json:"headers"`
+		}
+		if err := UnmarshalConfig(n, &cfg); err != nil {
+			errs = append(errs, ValidationError{
+				NodeID: id, Code: "api.config_invalid", Level: LevelError,
+				Message:        "api 节点配置无法解析",
+				ExpectedFormat: `{"unit_id": <number>, "params": {}, "headers": {"<头名>": <值>}}`,
+			})
+			continue
+		}
+		for k, v := range cfg.Headers {
+			s, isStr := v.(string)
+			if isStr && strings.HasPrefix(s, "=") {
+				// '=' 前缀的字符串按 JSONata 表达式处理,校验其语法。
+				if err := jsonata.Parse(strings.TrimSpace(s)[1:]); err != nil {
+					errs = append(errs, ValidationError{
+						NodeID: id, Code: "api.header_jsonata_invalid", Level: LevelError,
+						Message:        fmt.Sprintf("请求头 %s 的 JSONata 表达式语法错误: %v", k, err),
+						ExpectedFormat: `值以 '=' 开头则为 JSONata 表达式(如 "=token"),否则为字面量`,
+					})
+				}
+			}
 		}
 	}
 	return errs

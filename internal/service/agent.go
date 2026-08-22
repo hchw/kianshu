@@ -168,6 +168,10 @@ func systemPrompt(mode Mode) string {
    - api 节点的 inputs 必须根据 config.unit 里的 params/request_body
      声明每个参数的键与类型
    - 认证类参数（authorization/token/api-key）source 填 "$cache.token"
+   - swagger 中声明为 in:header 的参数（如 X-Timestamp/X-Nonce/X-Signature
+     等签名/专用头）在 api 节点用同名 inputs 键声明即可，执行器会自动
+     路由为请求头，不要把它们塞进 request_body 或 query，也不要改用
+     config.headers
    - 业务参数（query/path/body）的 source 引用上游输出键名
    - 任何 input 都不能没有来源——要么来自上游输出，
      要么来自 $cache.xxx，要么来自 start 入参
@@ -190,6 +194,14 @@ assert、loop、try、catch、cache-set、adapter(JSONata 转换)。
 下游节点通过 body.xxx 访问响应字段,通过 status_code 访问状态码。
 例如:缓存写入表达式需从 token 改为 body.token;
 断言字段需从 token 改为 body.token。
+
+【API 自定义请求头】api 节点可通过 config.headers 设置请求头(键→值),仅用于
+swagger 中未声明的专有自定义头,如 LLM 等第三方接口的专有头
+(如 Content-Type、X-Api-Key、OpenAI-Organization)。对已由 swagger 声明为
+in:header 的参数头,应改用 api 节点 inputs 同名键声明,执行器会自动路由为
+请求头,不必(也不应)塞进 config.headers。值以 '=' 开头为
+JSONata 表达式,对当前输入求值(如 {"headers":{"Authorization":"=token"}});
+否则为字面量。自定义头会覆盖同名的自动认证头,其余仍按原规则路由。
 
 【断言节点】config 格式: {"assertions": [{"field": "字段路径", "op": "eq|ne|contains|gt|lt", "expected": 期望值}]}
 field 支持点分隔路径如 status_code、body.token、body.0.name。
@@ -308,7 +320,7 @@ func toolSchemas() []openai.Tool {
 			Type: "function",
 			Function: openai.ToolFunction{
 				Name:        toolCreateNode,
-				Description: "创建节点。type: start|api|assert|loop|try|catch|cache-set|adapter。api 需带 unit_id,建议同时声明 inputs(参数键与类型)和 config.params(执行参数值键值对)。api 响应为信封 {\"status_code\":N,\"body\":...},cache-set 需连到数据来源的上游节点,config 的 writes 值:字符串走 JSONata 求值(如 body.token)、非字符串直接当字面量、固定字符串放 static 用 $static.xxx 引用,如 {\"writes\":{\"token\":\"body.token\",\"invalid\":\"$static.bad\"},\"static\":{\"bad\":\"fake_token\"}}。adapter 若接 api 信封需用 $.body.xxx 访问字段。assert 节点 config 形状为 {\"assertions\":[{\"field\":\"status_code|body.xxx\",\"op\":\"eq|ne|contains|gt|lt\",\"expected\":期望值}]}。loop 若接 api 信封,input 指向 body.xxx。",
+				Description: "创建节点。type: start|api|assert|loop|try|catch|cache-set|adapter。api 需带 unit_id,建议同时声明 inputs(参数键与类型)和 config.params(执行参数值键值对)。api 的 config.headers 可设置自定义请求头(键→值):值以 '=' 开头为 JSONata 表达式对当前输入求值(如 \"=token\"),否则为字面量;自定义头覆盖同名的自动认证头,适用于 LLM 等第三方接口的专有头。api 响应为信封 {\"status_code\":N,\"body\":...},cache-set 需连到数据来源的上游节点,config 的 writes 值:字符串走 JSONata 求值(如 body.token)、非字符串直接当字面量、固定字符串放 static 用 $static.xxx 引用,如 {\"writes\":{\"token\":\"body.token\",\"invalid\":\"$static.bad\"},\"static\":{\"bad\":\"fake_token\"}}。adapter 若接 api 信封需用 $.body.xxx 访问字段。assert 节点 config 形状为 {\"assertions\":[{\"field\":\"status_code|body.xxx\",\"op\":\"eq|ne|contains|gt|lt\",\"expected\":期望值}]}。loop 若接 api 信封,input 指向 body.xxx。",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"type":{"type":"string"},"parent":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id","type"],"additionalProperties":false}`),
 			},
 		},
@@ -316,7 +328,7 @@ func toolSchemas() []openai.Tool {
 			Type: "function",
 			Function: openai.ToolFunction{
 				Name:        toolUpdateNode,
-				Description: "更新节点的 inputs/outputs 或 config。cache-set 的 config 格式:{ \"writes\": { \"<缓存key>\": <值> }, \"static\": { \"<key>\": <固定字符串> } },writes 值:字符串→JSONata 表达式求值,非字符串→字面量,字符串字面量用 static+$static.xxx。",
+				Description: "更新节点的 inputs/outputs 或 config。api 节点的 config.headers 可设置自定义请求头(键→值),值以 '=' 开头为 JSONata 表达式对当前输入求值,否则为字面量,自定义头覆盖同名的自动认证头。cache-set 的 config 格式:{ \"writes\": { \"<缓存key>\": <值> }, \"static\": { \"<key>\": <固定字符串> } },writes 值:字符串→JSONata 表达式求值,非字符串→字面量,字符串字面量用 static+$static.xxx。",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"inputs":{"type":"object"},"outputs":{"type":"object"},"config":{"type":"object"}},"required":["id"],"additionalProperties":false}`),
 			},
 		},

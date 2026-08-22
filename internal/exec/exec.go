@@ -312,8 +312,10 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 			Method   string `json:"method"`
 			Path     string `json:"path"`
 			Security string `json:"security"`
+			Params   string `json:"params"`
 		} `json:"unit"`
-		Params map[string]any `json:"params,omitempty"`
+		Params  map[string]any `json:"params,omitempty"`
+		Headers map[string]any `json:"headers,omitempty"`
 	}
 	if err := flow.UnmarshalConfig(n, &cfg); err != nil {
 		return nil, err
@@ -332,6 +334,19 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 		}
 		params[k] = ev
 	}
+	// Evaluate explicit custom headers. A string starting with '=' is a JSONata
+	// expression evaluated against the current input (如 "=token" 或 "=$cache.token");
+	// other values are literal (字符串/数字/布尔). They override any header that
+	// would otherwise be auto-derived from auth inputs with the same name, so
+	// callers can force arbitrary headers (含 LLM 等第三方接口所需的专用头).
+	explicitHeaders := map[string]string{}
+	for k, v := range cfg.Headers {
+		ev, err := evalParamValue(v, in)
+		if err != nil {
+			return nil, fmt.Errorf("api 请求头 %s 求值失败: %w", k, err)
+		}
+		explicitHeaders[k] = headerString(ev)
+	}
 	// Merge input and params, explicit params taking precedence on the same key.
 	merged := map[string]any{}
 	for k, v := range in {
@@ -348,7 +363,25 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 	query := map[string]any{}
 	body := map[string]any{}
 	scheme := execSecurityScheme(cfg.Unit.Security)
+	// 以 Swagger 声明的参数位置(in)为第一优先级做路由:header → 请求头、
+	// query → 查询串、body → 请求体、path → 已被 substitutePath 处理。
+	// 仅对未声明位置的键回退到启发式(isAuthKey→认证头 / 有请求体→body / 否则→query),
+	// 从而让认证头与 in:header 参数(如签名三头)能同时/独立送达。
+	paramIn := parseParamIn(cfg.Unit.Params)
 	for k, v := range merged {
+		if loc, declared := paramIn[k]; declared && loc != "" {
+			switch loc {
+			case "header":
+				headers[k] = headerString(v)
+			case "query":
+				query[k] = v
+			case "body":
+				body[k] = v
+			case "path":
+				// 形如 {x} 的占位符若未被替换则保留原样,不回退路由。
+			}
+			continue
+		}
 		switch {
 		case isAuthKey(k):
 			// 认证输入按单元声明的 security 方案构造请求头(与后端契约对齐):
@@ -374,6 +407,11 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 			query[k] = v
 		}
 	}
+	// Explicit custom headers override auto-derived ones (auth headers etc.) on
+	// the same key, keeping auto-derivation as the fallback for everything else.
+	for k, v := range explicitHeaders {
+		headers[k] = v
+	}
 	host := e.opts.Host
 	if !strings.Contains(host, "://") {
 		host = "http://" + host
@@ -390,6 +428,20 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 		"status_code": float64(resp.StatusCode),
 		"body":        resp.Body,
 	}, nil
+}
+
+// headerString renders an evaluated header value as its HTTP string form.
+func headerString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(t)
+	default:
+		return fmt.Sprintf("%v", t)
+	}
 }
 
 // pathParamRe matches a `{name}` placeholder in a URL path.
@@ -420,6 +472,29 @@ func hasRequestBody(method string) bool {
 		return true
 	}
 	return false
+}
+
+// parseParamIn parses a unit's swagger params JSON ([]paramDecl) into a
+// name → location(header/query/body/path) lookup. Malformed or absent params
+// yield an empty map, falling back to heuristic routing.
+func parseParamIn(paramsJSON string) map[string]string {
+	out := map[string]string{}
+	if paramsJSON == "" || paramsJSON == "null" {
+		return out
+	}
+	var decls []struct {
+		Name string `json:"name"`
+		In   string `json:"in"`
+	}
+	if err := json.Unmarshal([]byte(paramsJSON), &decls); err != nil {
+		return out
+	}
+	for _, d := range decls {
+		if d.Name != "" {
+			out[d.Name] = d.In
+		}
+	}
+	return out
 }
 
 // adapterOutput transforms its input via a JSONata expression.
