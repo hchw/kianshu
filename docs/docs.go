@@ -3028,6 +3028,10 @@ const docTemplate = `{
                 "provider_id": {
                     "type": "integer",
                     "example": 1
+                },
+                "thinking": {
+                    "type": "string",
+                    "example": "high"
                 }
             }
         },
@@ -3082,6 +3086,10 @@ const docTemplate = `{
                 "system_prompt": {
                     "type": "string",
                     "example": "本流对接 XX 云签名规范"
+                },
+                "thinking": {
+                    "type": "string",
+                    "example": "high"
                 }
             }
         },
@@ -3665,6 +3673,9 @@ const docTemplate = `{
                     "example": "我的测试流"
                 },
                 "system_prompt": {
+                    "type": "string"
+                },
+                "thinking": {
                     "type": "string"
                 },
                 "tree": {

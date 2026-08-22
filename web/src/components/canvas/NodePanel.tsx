@@ -132,8 +132,15 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
                 onChange={(e) => setKV('unit_id', Number(e.target.value))}
               />
             </label>
-            <label>
-              执行参数 params (JSON)
+            <ApiParamsEditor
+              unit={unit}
+              params={typeof config.params === 'object' && config.params ? (config.params as Record<string, unknown>) : {}}
+              headers={typeof config.headers === 'object' && config.headers ? (config.headers as Record<string, unknown>) : {}}
+              onParamsChange={(p) => setKV('params', p)}
+              onHeadersChange={(h) => setKV('headers', h)}
+            />
+            <details className="mono small">
+              <summary>原始 JSON（params）</summary>
               <textarea
                 rows={4}
                 value={config.params ? JSON.stringify(config.params) : '{}'}
@@ -145,7 +152,7 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
                   }
                 }}
               />
-            </label>
+            </details>
             <label>
               自定义请求头 headers (JSON: 头名 → 值)
               <textarea
@@ -334,6 +341,187 @@ function tryPretty(s: string): string {
   } catch {
     return s
   }
+}
+
+// ---- ApiParamsEditor 按参数位置分组编辑执行参数 ----
+
+// parseParamLocations 解析单元 Swagger params [{name, in}] 为 name → 位置映射。
+// 不改变后端数据结构：仍写入 config.params，仅按定位分组展示给用户。
+export function parseParamLocations(paramsJSON: string | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!paramsJSON || paramsJSON === 'null') return out
+  try {
+    const arr = JSON.parse(paramsJSON)
+    if (!Array.isArray(arr)) return out
+    for (const p of arr) {
+      if (p && typeof p.name === 'string' && p.name) out[p.name] = String(p.in ?? '')
+    }
+  } catch {
+    /* ignore malformed */
+  }
+  return out
+}
+
+const PARAM_GROUP_META: Record<string, { label: string; hint: string }> = {
+  header: { label: '请求头 (header)', hint: '发送到 HTTP 请求头，如认证/签名头' },
+  query: { label: '查询参数 (query)', hint: '拼到 URL 查询串 ?k=v' },
+  body: { label: '请求体 (body)', hint: '放进请求体字段（对应 unit 的 schema）' },
+  path: { label: '路径参数 (path)', hint: '替换 URL 路径占位符 {name}' },
+  secret: { label: '密钥 (secret)', hint: '认证密钥，随认证头发送' },
+  default: { label: '其他（未声明位置）', hint: '后端按启发式路由：认证键→头 / 有请求体→body / 否则→query' },
+}
+
+const GROUP_ORDER = ['header', 'query', 'body', 'path', 'secret', 'default']
+
+function groupOf(inLoc: string): string {
+  return inLoc && PARAM_GROUP_META[inLoc] ? inLoc : 'default'
+}
+
+function ApiParamsEditor({
+  unit,
+  params,
+  headers,
+  onParamsChange,
+  onHeadersChange,
+}: {
+  unit: TestUnit | null
+  params: Record<string, unknown>
+  headers: Record<string, unknown>
+  onParamsChange: (next: Record<string, unknown>) => void
+  onHeadersChange: (next: Record<string, unknown>) => void
+}) {
+  const locations = parseParamLocations(unit?.params)
+  // 分组：declared 键按定位归组；未声明的键归到 default
+  const groups: Record<string, Record<string, unknown>> = {}
+  for (const g of GROUP_ORDER) groups[g] = {}
+  for (const [k, v] of Object.entries(params)) {
+    groups[groupOf(locations[k] ?? '')][k] = v
+  }
+
+  const parse = (raw: string): unknown => {
+    const trimmed = raw.trim()
+    if (trimmed === '') return ''
+    try {
+      return JSON.parse(trimmed)
+    } catch {
+      return raw
+    }
+  }
+  const displayVal = (v: unknown): string => {
+    if (v === null) return 'null'
+    if (typeof v === 'object') return JSON.stringify(v)
+    return String(v)
+  }
+
+  const removeKey = (key: string) => {
+    const next = { ...params }
+    delete next[key]
+    onParamsChange(next)
+  }
+  const removeHeader = (key: string) => {
+    const next = { ...headers }
+    delete next[key]
+    onHeadersChange(next)
+  }
+
+  // 动态添加区域
+  const [draftLoc, setDraftLoc] = useState<string>('default')
+  const [draftName, setDraftName] = useState('')
+  const [draftValue, setDraftValue] = useState('')
+  const commitDraft = () => {
+    if (!draftName.trim()) return
+    const key = draftName.trim()
+    if (draftLoc === 'header' || draftLoc === 'secret') {
+      // 显式请求头/密钥 → 走 config.headers，执行器强制进 HTTP 请求头
+      onHeadersChange({ ...headers, [key]: parse(draftValue) })
+    } else {
+      // query/body/path/其他 → 写入 config.params（启发式或 declared 定位）
+      if (!(key in params)) {
+        onParamsChange({ ...params, [key]: parse(draftValue) })
+      }
+    }
+    setDraftName('')
+    setDraftValue('')
+    setDraftLoc('default')
+  }
+
+  return (
+    <div className="api-params-editor">
+      <div className="muted small">执行参数（按 Swagger 定位分组，值手动编辑）</div>
+      {GROUP_ORDER.map((g) => {
+        const meta = PARAM_GROUP_META[g === 'default' ? 'default' : g]
+        const entries = Object.entries(groups[g])
+        const explicitHeaders = (g === 'header' || g === 'secret') ? Object.entries(headers) : []
+        if (entries.length === 0 && explicitHeaders.length === 0 && g !== 'default') return null
+        return (
+          <div key={g} className="card sub" style={{ marginTop: 6 }}>
+            <div className="muted strong small">{meta.label}</div>
+            <div className="muted small">{meta.hint}</div>
+            {entries.length === 0 && explicitHeaders.length === 0 && <p className="muted small">（无）</p>}
+            {entries.map(([k, v]) => (
+              <div key={'p-' + k} className="param-row row" style={{ gap: 4, alignItems: 'center' }}>
+                <span className="mono small param-key">{k}</span>
+                <input
+                  className="mono small"
+                  value={displayVal(v)}
+                  onChange={(e) => onParamsChange({ ...params, [k]: parse(e.target.value) })}
+                  data-param-key={k}
+                />
+                <button className="link small" onClick={() => removeKey(k)} title="删除此参数">
+                  ✕
+                </button>
+              </div>
+            ))}
+            {explicitHeaders.map(([k, v]) => (
+              <div key={'h-' + k} className="param-row row" style={{ gap: 4, alignItems: 'center' }}>
+                <span className="mono small param-key">{k}</span>
+                <input
+                  className="mono small"
+                  value={displayVal(v)}
+                  onChange={(e) => onHeadersChange({ ...headers, [k]: parse(e.target.value) })}
+                  data-header-key={k}
+                />
+                <button className="link small" onClick={() => removeHeader(k)} title="删除此请求头">
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )
+      })}
+      <div className="card sub" style={{ marginTop: 6 }}>
+        <div className="muted strong small">添加参数</div>
+        <div className="row" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select value={draftLoc} onChange={(e) => setDraftLoc(e.target.value)} data-testid="api-param-loc">
+            {['header', 'query', 'body', 'path', 'secret', 'default'].map((g) => (
+              <option key={g} value={g}>
+                {PARAM_GROUP_META[g].label}
+              </option>
+            ))}
+          </select>
+          <input
+            className="mono small"
+            placeholder="参数名"
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            data-testid="api-param-name"
+            style={{ width: 120 }}
+          />
+          <input
+            className="mono small"
+            placeholder="值（JSON 或字符串）"
+            value={draftValue}
+            onChange={(e) => setDraftValue(e.target.value)}
+            data-testid="api-param-value"
+            style={{ flex: 1, minWidth: 120 }}
+          />
+          <button className="link small" onClick={commitDraft}>
+            添加
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ---- AssertEditor 结构化断言编辑器 ----

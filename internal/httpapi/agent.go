@@ -21,11 +21,13 @@ type agentSubmitReq struct {
 	SelectedNodes []string `json:"selected_nodes,omitempty" example:"[\"get-users-{id}\"]"`
 	Mode          string   `json:"mode" enum:"edit,generate" example:"edit"`
 	SystemPrompt  *string  `json:"system_prompt,omitempty" example:"本流对接 XX 云签名规范"`
+	Thinking      string   `json:"thinking,omitempty" enum:"disabled,low,high,max" example:"high"`
 }
 
 type agentResumeReq struct {
 	ProviderID uint                  `json:"provider_id" validate:"required" example:"1"`
 	Answers    []service.PauseAnswer `json:"answers" validate:"required"`
+	Thinking   string                `json:"thinking,omitempty" enum:"disabled,low,high,max" example:"high"`
 }
 
 // agentProvider loads and decrypts the user's LLM provider for an agent run.

@@ -412,3 +412,30 @@ func TestRenameFlowAPI(t *testing.T) {
 		fmt.Sprintf(`{"user_id":%d,"role":"read"}`, readerID), http.StatusCreated)
 	c2.do("PATCH", fmt.Sprintf("/api/flow/flows/%d", flowID), `{"name":"hack"}`, http.StatusForbidden)
 }
+
+func TestFlowThinkingPersists(t *testing.T) {
+	c := newClient(t)
+	c.registerAndLogin()
+
+	_, ts := c.do("POST", "/api/test-sets", `{"name":"demo"}`, http.StatusCreated)
+	testSetID := uint(ts["id"].(float64))
+	_, fl := c.do("POST", fmt.Sprintf("/api/test-sets/%d/flows", testSetID), `{"name":"flow t"}`, http.StatusCreated)
+	flowID := uint(fl["id"].(float64))
+
+	_, draft := c.do("GET", fmt.Sprintf("/api/flow/flows/%d/draft", flowID), "", http.StatusOK)
+	if draft["thinking"] != "disabled" && draft["thinking"] != "" {
+		t.Fatalf("default thinking unexpected: %v", draft["thinking"])
+	}
+
+	// 通过专用端点保存思考级别。
+	_, got := c.do("PATCH", fmt.Sprintf("/api/flow/flows/%d/thinking", flowID), `{"thinking":"low"}`, http.StatusOK)
+	if got["thinking"] != "low" {
+		t.Fatalf("thinking PATCH should return low, got %v", got["thinking"])
+	}
+
+	// GET 草稿应能读回。
+	_, draft2 := c.do("GET", fmt.Sprintf("/api/flow/flows/%d/draft", flowID), "", http.StatusOK)
+	if draft2["thinking"] != "low" {
+		t.Fatalf("draft GET should reflect low, got %v", draft2["thinking"])
+	}
+}

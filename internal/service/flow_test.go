@@ -625,7 +625,7 @@ func TestDuplicateFlow(t *testing.T) {
 	}
 	// 写入一棵非空树作为工作状态。
 	tree := `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`
-	if _, err := UpdateDraft(gdb, f.ID, "支付流程", tree, nil); err != nil {
+	if _, err := UpdateDraft(gdb, f.ID, "支付流程", tree, nil, ""); err != nil {
 		t.Fatalf("update draft: %v", err)
 	}
 
@@ -657,7 +657,7 @@ func TestDuplicateFlow(t *testing.T) {
 			t.Fatalf("draft tree: got %q want %q", d.Tree, tree)
 		}
 		// 复制必须独立:改新流草稿不影响原流。
-		if _, err := UpdateDraft(gdb, dup.ID, dup.Name, `{"start":"n2","nodes":{"n2":{"id":"n2","type":"start"}}}`, nil); err != nil {
+		if _, err := UpdateDraft(gdb, dup.ID, dup.Name, `{"start":"n2","nodes":{"n2":{"id":"n2","type":"start"}}}`, nil, ""); err != nil {
 			t.Fatalf("update dup draft: %v", err)
 		}
 		orig, err := GetDraft(gdb, f.ID)
@@ -792,7 +792,7 @@ func TestSaveAndEnableSnapshotsSystemPrompt(t *testing.T) {
 
 	// 改草稿文档后再固化：新版本带新文档，旧版本保持旧文档（自包含快照）。
 	doc2 := "签名规则 v2：SHA256withRSA"
-	if _, err := UpdateDraft(gdb, f.ID, "flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &doc2); err != nil {
+	if _, err := UpdateDraft(gdb, f.ID, "flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &doc2, ""); err != nil {
 		t.Fatalf("update draft: %v", err)
 	}
 	ver2, res, err := SaveAndEnable(gdb, f.ID, 1)
@@ -815,7 +815,7 @@ func TestSaveAndEnableSnapshotsSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get version 2: %v", err)
 	}
-	if _, err := UpdateDraft(gdb, f.ID, "flow", got2.Tree, &got2.SystemPrompt); err != nil {
+	if _, err := UpdateDraft(gdb, f.ID, "flow", got2.Tree, &got2.SystemPrompt, ""); err != nil {
 		t.Fatalf("restore version 2: %v", err)
 	}
 	d, err := GetDraft(gdb, f.ID)

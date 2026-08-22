@@ -35,8 +35,8 @@ type FunctionCall struct {
 
 // Tool describes a function tool exposed to the model.
 type Tool struct {
-	Type     string         `json:"type"`
-	Function ToolFunction   `json:"function"`
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
 }
 
 // ToolFunction describes a tool's name, description, and JSON schema.
@@ -158,13 +158,18 @@ func (c *Client) ChatCompletion(ctx context.Context, p Provider, req CompletionR
 // StreamCallback receives each incremental content delta as it arrives.
 type StreamCallback func(text string)
 
+// ReasoningCallback receives each incremental thinking/reasoning delta
+// (reasoning_content) as it arrives, before the final answer content.
+type ReasoningCallback func(text string)
+
 // streamChunk is the delta frame shape of an OpenAI-compatible SSE stream.
 type streamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
 				Function struct {
@@ -183,7 +188,7 @@ type streamChunk struct {
 // each content delta to onChunk in real time. Tool-call deltas (id/name/
 // arguments fragments) are accumulated across frames and returned assembled in
 // the final message, so callers treat it exactly like ChatCompletion.
-func (c *Client) StreamChatCompletion(ctx context.Context, p Provider, req CompletionRequest, onChunk StreamCallback) (*CompletionResponse, error) {
+func (c *Client) StreamChatCompletion(ctx context.Context, p Provider, req CompletionRequest, onChunk StreamCallback, onReasoning ReasoningCallback) (*CompletionResponse, error) {
 	req.Stream = true
 	req.Messages = req.applyContentFallback()
 	body, err := json.Marshal(req)
@@ -213,6 +218,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, p Provider, req Compl
 	// Tool-call argument JSON can exceed the default 64KB line cap.
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var contentBuf strings.Builder
+	var reasoningBuf strings.Builder
 	var toolCalls []ToolCall
 	var role string
 	for scanner.Scan() {
@@ -243,6 +249,12 @@ func (c *Client) StreamChatCompletion(ctx context.Context, p Provider, req Compl
 			contentBuf.WriteString(d.Content)
 			if onChunk != nil {
 				onChunk(d.Content)
+			}
+		}
+		if d.ReasoningContent != "" {
+			reasoningBuf.WriteString(d.ReasoningContent)
+			if onReasoning != nil {
+				onReasoning(d.ReasoningContent)
 			}
 		}
 		for _, tc := range d.ToolCalls {
@@ -278,7 +290,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, p Provider, req Compl
 func (c *Client) Test(ctx context.Context, p Provider) error {
 	msg := "ping"
 	req := CompletionRequest{
-		Model: p.GetModel(),
+		Model:    p.GetModel(),
 		Messages: []Message{{Role: "user", Content: &msg}},
 	}
 	if _, err := c.ChatCompletion(ctx, p, req); err != nil {

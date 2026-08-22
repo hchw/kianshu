@@ -1,7 +1,7 @@
 import { api } from './client'
 
 export interface AgentEvent {
-  kind?: 'tool' | 'text' | 'round'
+  kind?: 'tool' | 'text' | 'round' | 'reasoning'
   round: number
   tool?: string
   args?: unknown
@@ -46,6 +46,7 @@ export interface AgentSubmitReq {
   selected_nodes?: string[]
   mode: 'edit' | 'generate'
   system_prompt?: string
+  thinking?: string
 }
 
 export async function agentSession(flowID: number) {
@@ -58,10 +59,11 @@ export async function agentSubmit(flowID: number, req: AgentSubmitReq) {
   return data
 }
 
-export async function agentResume(flowID: number, providerID: number, answers: PauseAnswer[]) {
+export async function agentResume(flowID: number, providerID: number, answers: PauseAnswer[], thinking?: string) {
   const { data } = await api.post<AgentResult>(`/flow/flows/${flowID}/agent/resume`, {
     provider_id: providerID,
     answers,
+    thinking,
   })
   return data
 }

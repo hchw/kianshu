@@ -31,6 +31,7 @@ export interface Draft {
   name: string
   tree: string
   system_prompt: string
+  thinking?: string
 }
 
 export interface FlowVersion {
@@ -63,11 +64,25 @@ export async function getDraft(flowID: number) {
   return data
 }
 
-export async function updateDraft(flowID: number, name: string, tree: FlowTree, systemPrompt?: string) {
+export async function updateDraft(
+  flowID: number,
+  name: string,
+  tree: FlowTree,
+  systemPrompt?: string,
+  thinking?: string,
+) {
   const { data } = await api.put<Draft>(`/flow/flows/${flowID}/draft`, {
     name,
     tree,
     system_prompt: systemPrompt,
+    thinking,
+  })
+  return data
+}
+
+export async function updateFlowThinking(flowID: number, thinking: string) {
+  const { data } = await api.patch(`/flow/flows/${flowID}/thinking`, {
+    thinking,
   })
   return data
 }

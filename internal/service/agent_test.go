@@ -509,7 +509,7 @@ type streamingFakeProvider struct {
 	fakeProvider
 }
 
-func (f *streamingFakeProvider) StreamChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest, onChunk openai.StreamCallback) (*openai.CompletionResponse, error) {
+func (f *streamingFakeProvider) StreamChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest, onChunk openai.StreamCallback, onReasoning openai.ReasoningCallback) (*openai.CompletionResponse, error) {
 	f.visited = append(f.visited, req)
 	var round scriptedRound
 	if len(f.script) > 0 {
@@ -1119,7 +1119,7 @@ func TestRunAgentInjectsSystemPrompt(t *testing.T) {
 	flowID := createAgentFlow(t, gdb)
 	doc := "本流签名规则：canonical 字符串按时间戳-方法-路径排序后加签"
 	dp := doc
-	if _, err := UpdateDraft(gdb, flowID, "agent flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &dp); err != nil {
+	if _, err := UpdateDraft(gdb, flowID, "agent flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &dp, ""); err != nil {
 		t.Fatalf("update draft: %v", err)
 	}
 
@@ -1142,7 +1142,7 @@ func TestRunAgentInjectsSystemPrompt(t *testing.T) {
 
 	// 清空文档后：系统消息与全局提示一致，无标记块。
 	empty := ""
-	if _, err := UpdateDraft(gdb, flowID, "agent flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &empty); err != nil {
+	if _, err := UpdateDraft(gdb, flowID, "agent flow", `{"start":"n1","nodes":{"n1":{"id":"n1","type":"start"}}}`, &empty, ""); err != nil {
 		t.Fatalf("update draft: %v", err)
 	}
 	req3 := runAgentOnce(t, gdb, flowID, "", nil)

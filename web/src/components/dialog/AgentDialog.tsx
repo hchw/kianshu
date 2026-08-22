@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentEvent, AgentSession, PauseAnswer, PauseQuestion } from '../../api/agent'
 import { agentCompress, agentNew, agentSession } from '../../api/agent'
+import { updateFlowThinking } from '../../api/flow'
 import { apiError } from '../../api/client'
 import type { FlowTree } from '../../api/flow'
 import type { Provider } from '../../api/providers'
@@ -15,6 +16,7 @@ interface Props {
   providers: Provider[]
   tree: FlowTree
   systemPrompt?: string
+  initialThinking?: string
   onChanged: () => void
   onTreePreview: (t: FlowTree) => void
 }
@@ -26,10 +28,20 @@ interface Message {
   tool_call_id?: string
 }
 
-export default function AgentDialog({ flowID, providers, tree, systemPrompt, onChanged, onTreePreview }: Props) {
+export default function AgentDialog({ flowID, providers, tree, systemPrompt, initialThinking, onChanged, onTreePreview }: Props) {
   const [providerID, setProviderID] = useState(0)
   const [instruction, setInstruction] = useState('')
   const [mode, setMode] = useState<'edit' | 'generate'>('generate')
+  const [thinking, setThinking] = useState(initialThinking ?? 'disabled')
+  // 只在 initialThinking 真正变化（切换流/刷新后重新加载草稿）时同步刷新。
+  // 保存优先级：用户手动选择最高，其次是后端回退；此处仅作初值兜底。
+  const lastInitial = useRef(initialThinking)
+  useEffect(() => {
+    if (lastInitial.current !== initialThinking) {
+      lastInitial.current = initialThinking
+      setThinking(initialThinking ?? 'disabled')
+    }
+  }, [initialThinking])
   const [selected, setSelected] = useState<string[]>([])
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [messages, setMessages] = useState<Message[]>([])
@@ -41,8 +53,12 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, onC
   const [roundTexts, setRoundTexts] = useState<Record<number, string>>({})
   const [liveRound, setLiveRound] = useState<number | null>(null)
   const [liveText, setLiveText] = useState('')
+  // 深度思考内容：每轮一个可折叠块，展示-only(不回传给 LLM)。
+  const [roundReasonings, setRoundReasonings] = useState<Record<number, string>>({})
+  const [liveReasoning, setLiveReasoning] = useState('')
   const liveRoundRef = useRef<number | null>(null)
   const liveTextRef = useRef('')
+  const liveReasoningRef = useRef('')
   const abortRef = useRef<{ abort: () => void } | null>(null)
   const boxRef = useRef<HTMLDivElement>(null)
   const subRef = useRef<{ abort: () => void } | null>(null)
@@ -81,22 +97,38 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, onC
         if (ev.kind === 'round') {
           liveRoundRef.current = ev.round
           liveTextRef.current = ''
+          liveReasoningRef.current = ''
           setLiveRound(ev.round)
           setLiveText('')
+          setLiveReasoning('')
         } else if (ev.kind === 'text') {
           liveTextRef.current += ev.text ?? ''
           if (liveRoundRef.current != null) {
             setLiveRound(liveRoundRef.current)
             setLiveText(liveTextRef.current)
           }
+        } else if (ev.kind === 'reasoning') {
+          liveReasoningRef.current += ev.text ?? ''
+          if (liveRoundRef.current != null) {
+            setLiveRound(liveRoundRef.current)
+            setLiveReasoning(liveReasoningRef.current)
+          }
         } else {
           if (liveRoundRef.current != null && liveTextRef.current) {
             setRoundTexts((r) => ({ ...r, [liveRoundRef.current!]: liveTextRef.current }))
           }
+          if (liveRoundRef.current != null && liveReasoningRef.current) {
+            setRoundReasonings((r) => ({
+              ...r,
+              [liveRoundRef.current!]: liveReasoningRef.current,
+            }))
+          }
           liveRoundRef.current = null
           liveTextRef.current = ''
+          liveReasoningRef.current = ''
           setLiveRound(null)
           setLiveText('')
+          setLiveReasoning('')
           setEvents((cur) => [...cur, ev])
           if (ev.tool && ev.result) {
             const next = applyToolMutation(workingTree, ev)
@@ -199,23 +231,39 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, onC
         if (ev.kind === 'round') {
           liveRoundRef.current = ev.round
           liveTextRef.current = ''
+          liveReasoningRef.current = ''
           setLiveRound(ev.round)
           setLiveText('')
+          setLiveReasoning('')
         } else if (ev.kind === 'text') {
           liveTextRef.current += ev.text ?? ''
           if (liveRoundRef.current != null) {
             setLiveRound(liveRoundRef.current)
             setLiveText(liveTextRef.current)
           }
+        } else if (ev.kind === 'reasoning') {
+          liveReasoningRef.current += ev.text ?? ''
+          if (liveRoundRef.current != null) {
+            setLiveRound(liveRoundRef.current)
+            setLiveReasoning(liveReasoningRef.current)
+          }
         } else {
           // tool event – finalize this round's accumulated assistant text
           if (liveRoundRef.current != null && liveTextRef.current) {
             setRoundTexts((r) => ({ ...r, [liveRoundRef.current!]: liveTextRef.current }))
           }
+          if (liveRoundRef.current != null && liveReasoningRef.current) {
+            setRoundReasonings((r) => ({
+              ...r,
+              [liveRoundRef.current!]: liveReasoningRef.current,
+            }))
+          }
           liveRoundRef.current = null
           liveTextRef.current = ''
+          liveReasoningRef.current = ''
           setLiveRound(null)
           setLiveText('')
+          setLiveReasoning('')
           setEvents((cur) => [...cur, ev])
 
           // 变异类工具事件 → 本地回放到画布
@@ -395,6 +443,31 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, onC
                 <button className="link">新会话</button>
               </PopConfirm>
       </div>
+      <div className="row tight">
+        <label className="muted">深度思考</label>
+        <select
+          value={thinking}
+          onChange={(e) => {
+            const v = e.target.value
+            setThinking(v)
+            updateFlowThinking(flowID, v)
+              .then(() => {
+                console.log(`[thinking] 已保存 flow=${flowID} thinking=${v}`)
+              })
+              .catch((err) => {
+                // 保存失败也要让用户看到，避免"选了却没生效"的困惑。
+                console.error(`[thinking] 保存失败 flow=${flowID}:`, err)
+                setErr('深度思考偏好保存失败，本次仍按所选级别生效')
+              })
+          }}
+        >
+          <option value="disabled">关闭</option>
+          <option value="unset">不设置</option>
+          <option value="low">低</option>
+          <option value="high">高</option>
+          <option value="max">最高</option>
+        </select>
+      </div>
       <div className="muted">限定节点范围</div>
       <div className="node-tags">
         <button
@@ -443,12 +516,19 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, onC
         {events.map((ev, i) => {
           const isFirstInRound = i === 0 || events[i - 1].round !== ev.round
           const rText = roundTexts[ev.round]
+          const rReason = roundReasonings[ev.round]
           return (
             <div key={`ev-${i}`}>
-              {isFirstInRound && rText && (
+              {isFirstInRound && (rText || rReason) && (
                 <div className="chat-msg assistant">
                   <div className="chat-role">助手 #{ev.round}</div>
-                  <div className="chat-text">{rText}</div>
+                  {rReason && (
+                    <details className="chat-reasoning">
+                      <summary>深度思考</summary>
+                      <div className="chat-text mono">{rReason}</div>
+                    </details>
+                  )}
+                  {rText && <div className="chat-text">{rText}</div>}
                 </div>
               )}
               <div className="chat-msg tool">
@@ -463,6 +543,12 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, onC
         {liveRound != null && (
           <div className="chat-msg assistant live">
             <div className="chat-role">助手 #{liveRound}</div>
+            {liveReasoning && (
+              <details className="chat-reasoning" open={liveReasoning.length > 0}>
+                <summary>深度思考</summary>
+                <div className="chat-text mono">{liveReasoning}</div>
+              </details>
+            )}
             <div className="chat-text">{liveText}</div>
           </div>
         )}

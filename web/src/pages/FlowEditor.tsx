@@ -364,6 +364,7 @@ export default function FlowEditor() {
               providers={providers}
               tree={tree}
               systemPrompt={systemPrompt}
+              initialThinking={draft?.thinking ?? 'disabled'}
               onChanged={() => load()}
               onTreePreview={onTreePreview}
             />
