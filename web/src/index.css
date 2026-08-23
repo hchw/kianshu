@@ -926,6 +926,42 @@ h3 {
   font-size: var(--fs-13);
 }
 
+/* 可编辑 I/O 段：每个输入/输出行 = desc + (source) + 删除键，横向排布 */
+.node-panel .io-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+.node-panel .io-row > label {
+  flex: 1;
+  margin: var(--space-2) 0 0;
+}
+.node-panel .io-row > label + input {
+  flex: 1;
+}
+.node-panel .io-row > button {
+  flex: 0 0 auto;
+}
+.node-panel .io-row.removed {
+  opacity: 0.45;
+}
+.node-panel .io-row.removed input {
+  text-decoration: line-through;
+}
+
+/* ApiParamsEditor 分组编辑器：参数行对齐 + 覆盖态 */
+.api-params-editor .param-key {
+  flex: 0 0 auto;
+  min-width: 96px;
+  font-weight: 600;
+}
+.api-params-editor .source-input {
+  flex: 0 1 200px;
+}
+.api-params-editor input.override {
+  border-color: var(--primary, #3b82f6);
+}
+
 /* @xyflow/react 画布主题化（覆盖 --xy-* 变量，随主题切换） */
 .react-flow {
   --xy-background-color: var(--bg);

@@ -137,6 +137,14 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 	questions := parsePauseQuestions(analysis.Content)
 	questions = append(questions, detectAuthConflicts(units, d.Tree)...)
 	if len(questions) > 0 {
+		// 暂停前先落盘分析阶段已经产生的节点变更；否则前端收到暂停后
+		// refresh/onChanged 会重新读取旧草稿，导致本轮生成的节点全部消失。
+		if err := SnapshotAPINodes(db, tree); err != nil {
+			return nil, err
+		}
+		if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt, d.Thinking); err != nil {
+			return nil, err
+		}
 		if b, err := json.Marshal(req.Messages[1:]); err == nil {
 			session.Messages = string(b)
 		}

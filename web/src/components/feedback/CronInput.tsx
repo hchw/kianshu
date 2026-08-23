@@ -46,7 +46,7 @@ export default function CronInput({ value, onChange, error }: Props) {
   const [desc, setDesc] = useState('')
   const [nextRuns, setNextRuns] = useState<string[]>([])
   const [valid, setValid] = useState(true)
-  const debounce = useRef<ReturnType<typeof setTimeout>>()
+  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // 当前是几段 cron
   const is6 = useMemo(() => value.trim().split(/\s+/).length === 6, [value])

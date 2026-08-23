@@ -36,7 +36,8 @@ const (
 // IOKey describes one input or output key with its type and optional source.
 type IOKey struct {
 	Type   IOType `json:"type"`
-	Source string `json:"source,omitempty"` // e.g. "$cache.key" or an ancestor output key
+	Source string `json:"source,omitempty"`
+	In     string `json:"in,omitempty"` // e.g. "$cache.key" or an ancestor output key
 }
 
 // Node is one vertex of the execution tree.

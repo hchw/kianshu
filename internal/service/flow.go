@@ -269,7 +269,7 @@ func deriveInputs(unit model.TestUnit) map[string]flow.IOKey {
 				if isAuthKey(p.Name) {
 					src = "$cache.token"
 				}
-				io[p.Name] = flow.IOKey{Type: key, Source: src}
+				io[p.Name] = flow.IOKey{Type: key, Source: src, In: p.In}
 			}
 		}
 	}
@@ -290,7 +290,7 @@ func deriveInputs(unit model.TestUnit) map[string]flow.IOKey {
 				if isAuthKey(propName) {
 					src = "$cache.token"
 				}
-				io[propName] = flow.IOKey{Type: key, Source: src}
+				io[propName] = flow.IOKey{Type: key, Source: src, In: "body"}
 			}
 		}
 	}
@@ -329,9 +329,10 @@ func SnapshotAPINodes(db *gorm.DB, tree *flow.Tree) error {
 			continue
 		}
 		var apiCfg struct {
-			UnitID uint           `json:"unit_id"`
-			Unit   UnitSnapshot   `json:"unit"`
-			Params map[string]any `json:"params,omitempty"`
+			UnitID  uint           `json:"unit_id"`
+			Unit    UnitSnapshot   `json:"unit"`
+			Params  map[string]any `json:"params,omitempty"`
+			Headers map[string]any `json:"headers,omitempty"`
 		}
 		_ = flow.UnmarshalConfig(n, &apiCfg)
 		apiCfg.UnitID = cfg.UnitID

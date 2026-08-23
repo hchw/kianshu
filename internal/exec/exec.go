@@ -341,6 +341,10 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 	// callers can force arbitrary headers (含 LLM 等第三方接口所需的专用头).
 	explicitHeaders := map[string]string{}
 	for k, v := range cfg.Headers {
+		// nil 仅声明该名称属于 Header，不覆盖 inputs 中的 source 值。
+		if v == nil {
+			continue
+		}
 		ev, err := evalParamValue(v, in)
 		if err != nil {
 			return nil, fmt.Errorf("api 请求头 %s 求值失败: %w", k, err)
@@ -368,6 +372,17 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 	// 仅对未声明位置的键回退到启发式(isAuthKey→认证头 / 有请求体→body / 否则→query),
 	// 从而让认证头与 in:header 参数(如签名三头)能同时/独立送达。
 	paramIn := parseParamIn(cfg.Unit.Params)
+	// inputs.in 是节点级显式位置；config.headers 的 key 兼容地表示强制 Header。
+	for k, io := range n.Inputs {
+		if io.In != "" {
+			paramIn[k] = io.In
+		}
+	}
+	for k := range cfg.Headers {
+		if _, explicit := n.Inputs[k]; !explicit {
+			paramIn[k] = "header"
+		}
+	}
 	for k, v := range merged {
 		if loc, declared := paramIn[k]; declared && loc != "" {
 			switch loc {

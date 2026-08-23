@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import React from 'react'
 
 vi.mock('../../api/testset', () => ({
   getUnit: () => Promise.resolve(null),
 }))
 
+import type { FlowTree } from '../../api/flow'
 import NodePanel from './NodePanel'
 
 function panelTree(): FlowTree {

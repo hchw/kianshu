@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import PopConfirm from './PopConfirm'
 
-function setup(extra?: Parameters<typeof PopConfirm>[0]) {
+function setup(extra?: { input?: { defaultValue?: string; placeholder?: string } }) {
   const onConfirm = vi.fn()
   const utils = render(
     <PopConfirm

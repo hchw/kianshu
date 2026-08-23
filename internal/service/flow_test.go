@@ -141,6 +141,35 @@ func TestDeriveInputsParamsOverrideBody(t *testing.T) {
 	}
 }
 
+func TestSnapshotAPINodesPreservesHeaders(t *testing.T) {
+	gdb := testDB(t)
+	unit := &model.TestUnit{TestSetID: 1, Method: "POST", Path: "/test", Params: "null", Spec: `{"paths":{}}`}
+	if err := gdb.Create(unit).Error; err != nil {
+		t.Fatal(err)
+	}
+	tree := &flow.Tree{Start: "n1", Nodes: map[string]*flow.Node{
+		"n1": flow.NewNode("n1", flow.NodeStart), "n2": flow.NewNode("n2", flow.NodeAPI),
+	}}
+	cfg, err := flow.MarshalConfig(map[string]any{"unit_id": unit.ID, "headers": map[string]any{"X-Custom": "abc"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree.Nodes["n2"].Config = cfg
+	tree.AddChild("n1", "n2")
+	if err := SnapshotAPINodes(gdb, tree); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Headers map[string]any `json:"headers"`
+	}
+	if err := flow.UnmarshalConfig(tree.Nodes["n2"], &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Headers["X-Custom"] != "abc" {
+		t.Fatalf("headers 在快照后丢失: %#v", got.Headers)
+	}
+}
+
 func TestSnapshotAPINodesWithDeriveInputs(t *testing.T) {
 	gdb := testDB(t)
 	unit := &model.TestUnit{

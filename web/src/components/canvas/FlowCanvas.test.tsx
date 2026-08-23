@@ -29,7 +29,7 @@ vi.mock('@xyflow/react', () => ({
     const [nodes, setNodes] = React.useState(init)
     return [nodes, setNodes, () => {}]
   },
-  applyNodeChanges: (changes: any, nodes: any) => nodes,
+  applyNodeChanges: (_changes: any, nodes: any) => nodes,
 }))
 
 import FlowCanvas from './FlowCanvas'
