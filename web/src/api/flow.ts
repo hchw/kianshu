@@ -5,6 +5,7 @@ export interface IOKey {
   desc?: string
   source?: string
   from?: string
+  in?: 'header' | 'body' | 'query' | 'path'
 }
 
 export interface FlowNode {

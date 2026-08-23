@@ -10,6 +10,7 @@ interface Props {
 }
 
 export default function MembersPanel({ testSetID, ownerID }: Props) {
+  void ownerID
   const [owner, setOwner] = useState<MemberView | null>(null)
   const [members, setMembers] = useState<MemberView[]>([])
   const [role, setRole] = useState('edit')

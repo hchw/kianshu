@@ -58,6 +58,7 @@ func Validate(t *Tree, opts ValidatorOptions) Result {
 	res.Errors = append(res.Errors, t.validateIOContracts()...)
 	res.Errors = append(res.Errors, t.validateAdapters()...)
 	res.Errors = append(res.Errors, t.validateAPIConfigs()...)
+	res.Errors = append(res.Errors, t.validateInputLocations()...)
 	res.Warnings = append(res.Warnings, t.validateAdapterFuncs()...)
 	res.Errors = append(res.Errors, t.validateTryCatch()...)
 	res.Errors = append(res.Errors, t.validateLoops()...)
@@ -392,6 +393,26 @@ func (t *Tree) validateAPIConfigs() []ValidationError {
 						ExpectedFormat: `值以 '=' 开头则为 JSONata 表达式(如 "=token"),否则为字面量`,
 					})
 				}
+			}
+		}
+	}
+	return errs
+}
+
+func (t *Tree) validateInputLocations() []ValidationError {
+	var errs []ValidationError
+	for id, n := range t.Nodes {
+		if n == nil {
+			continue
+		}
+		for key, io := range n.Inputs {
+			if io.In == "" {
+				continue
+			}
+			switch io.In {
+			case "header", "body", "query", "path":
+			default:
+				errs = append(errs, ValidationError{NodeID: id, Code: "input.location_invalid", Level: LevelError, Message: fmt.Sprintf("输入 %s 的请求位置无效: %s", key, io.In), ExpectedFormat: `in 必须为 header、body、query 或 path`})
 			}
 		}
 	}

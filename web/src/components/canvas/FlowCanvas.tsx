@@ -39,7 +39,7 @@ interface Props {
   onSelect: (id: string | null) => void
   onTreeChange: (t: FlowTree) => void
   onSaved: () => void
-  onDelete: (id: string) => void
+  onDelete?: (id: string) => void
   testSetID: number
   /** 最近一次试运行的节点结果，key 为 node_id */
   nodeResults: Record<string, NodeRunStatus> | null
@@ -108,6 +108,7 @@ export default function FlowCanvas(props: Props) {
 }
 
 function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete, testSetID, nodeResults }: Props) {
+  const deleteNode = onDelete ?? (() => {})
   const [paletteOpen, setPaletteOpen] = useState(() => localStorage.getItem(PALETTE_KEY) !== '0')
   const togglePalette = () =>
     setPaletteOpen((o) => {
@@ -153,7 +154,7 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
             background: 'var(--surface)',
             color: 'var(--text)',
             boxShadow: selected === id ? 'var(--shadow-md)' : 'var(--shadow-sm)',
-          } as Record<string, string>,
+          } as unknown as Record<string, string>,
         },
         style: {
           ...({ '--node-color': color } as Record<string, string>),
@@ -203,8 +204,6 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
           source: id,
           target: c,
           type: 'default',
-          sourcePosition: Position.Bottom,
-          targetPosition: Position.Top,
           animated: false,
         })
       }
@@ -381,7 +380,7 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
           nodeID={selected}
           onTreeChange={onTreeChange}
           onSaved={onSaved}
-          onDelete={onDelete}
+          onDelete={deleteNode}
           onClose={() => onSelect(null)}
           testSetID={testSetID}
         />
