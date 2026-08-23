@@ -3897,11 +3897,17 @@ const docTemplate = `{
         "service.AgentResult": {
             "type": "object",
             "properties": {
+                "can_enable": {
+                    "type": "boolean"
+                },
                 "events": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/service.Event"
                     }
+                },
+                "final_valid": {
+                    "type": "boolean"
                 },
                 "finished": {
                     "type": "boolean"

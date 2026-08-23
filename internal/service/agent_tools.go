@@ -22,6 +22,7 @@ const (
 	toolDeleteNode  = "delete_node"
 	toolLinkNodes   = "link_nodes"
 	toolValidate    = "validate_flow"
+	toolCheckpoint  = "checkpoint"
 )
 
 // UnitBrief is the summarized unit shape fed to the LLM.
@@ -77,13 +78,15 @@ func ExecTool(ctx *ToolContext, name string, args json.RawMessage) *ToolResult {
 		return execLinkNodes(ctx, args)
 	case toolValidate:
 		return execValidateFlow(ctx)
+	case toolCheckpoint:
+		return execValidateFlow(ctx)
 	default:
 		return toolError("", "工具不存在,可用工具: %s", strings.Join(allToolNames(), ", "))
 	}
 }
 
 func allToolNames() []string {
-	return []string{toolListUnits, toolFilterUnits, toolGetFlow, toolCreateNode, toolUpdateNode, toolDeleteNode, toolLinkNodes, toolValidate}
+	return []string{toolListUnits, toolFilterUnits, toolGetFlow, toolCreateNode, toolUpdateNode, toolDeleteNode, toolLinkNodes, toolValidate, toolCheckpoint}
 }
 
 // listUnitsQuery filters non-deleted test units of the test set.
@@ -172,6 +175,9 @@ func execCreateNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 	node := &flow.Node{
 		ID: a.ID, Type: typ, Inputs: a.Inputs, Outputs: a.Outputs, Config: a.Config,
 	}
+	if err := validateAPIBodyShape(ctx.DB, node); err != nil {
+		return toolError(`{"inputs":{"<字段>":{"type":"primitive","source":"<来源>","in":"body"}},"config":{"unit_id":<number>,"params":{}}}`, "%v", err)
+	}
 	ctx.Tree.Nodes[a.ID] = node
 	if a.Parent != "" {
 		if _, ok := ctx.Tree.Nodes[a.Parent]; !ok {
@@ -218,6 +224,17 @@ func execUpdateNode(ctx *ToolContext, raw json.RawMessage) *ToolResult {
 				ToolArgs:  string(toolArgs),
 			}},
 		}
+	}
+	// 在写入前校验 API body 结构，避免错误节点进入工作树。
+	candidate := *node
+	if a.Inputs != nil {
+		candidate.Inputs = a.Inputs
+	}
+	if a.Config != nil {
+		candidate.Config = a.Config
+	}
+	if err := validateAPIBodyShape(ctx.DB, &candidate); err != nil {
+		return toolError(`{"inputs":{"<字段>":{"type":"primitive","source":"<来源>","in":"body"}},"config":{"unit_id":<number>,"params":{}}}`, "%v", err)
 	}
 	if a.Inputs != nil {
 		node.Inputs = a.Inputs
@@ -381,13 +398,56 @@ func nodeIO(n *flow.Node) map[string]any {
 	}
 }
 
+// validateAPIBodyShape rejects the ambiguous whole-body wrapper when the unit
+// exposes named body properties. A real property named body remains valid.
+func validateAPIBodyShape(db *gorm.DB, n *flow.Node) error {
+	if n.Type != flow.NodeAPI || db == nil {
+		return nil
+	}
+	var ref struct {
+		UnitID uint `json:"unit_id"`
+	}
+	if err := flow.UnmarshalConfig(n, &ref); err != nil || ref.UnitID == 0 {
+		return nil
+	}
+	var unit model.TestUnit
+	if err := db.Unscoped().First(&unit, ref.UnitID).Error; err != nil {
+		return nil
+	}
+	derived := deriveInputs(unit)
+	if _, hasBodyProperty := derived["body"]; !hasBodyProperty {
+		if _, ok := n.Inputs["body"]; ok {
+			return fmt.Errorf("API 单元 %d 的 body 是请求体容器，不能作为请求体字段；请改为使用 request_body.properties 中的真实字段", ref.UnitID)
+		}
+		var cfg struct {
+			Params map[string]any `json:"params"`
+		}
+		if err := flow.UnmarshalConfig(n, &cfg); err == nil {
+			if _, ok := cfg.Params["body"]; ok {
+				return fmt.Errorf("API 单元 %d 的 config.params.body 会造成 body 套 body，请改用真实 body 字段", ref.UnitID)
+			}
+		}
+	}
+	return nil
+}
+
 func execValidateFlow(ctx *ToolContext) *ToolResult {
+	log.Infof("agent: 主动 checkpoint/validate_flow 校验开始")
 	res := flow.Validate(ctx.Tree, flow.ValidatorOptions{
 		UnitDeleted: func(unitID uint) bool {
 			var unit model.TestUnit
 			return ctx.DB.Unscoped().First(&unit, unitID).Error == nil && unit.DeletedAt.Valid
 		},
 	})
+	// flow 包本身不依赖数据库，API body schema 校验在 service 层补充。
+	for id, n := range ctx.Tree.Nodes {
+		if err := validateAPIBodyShape(ctx.DB, n); err != nil {
+			res.Errors = append(res.Errors, flow.ValidationError{
+				NodeID: id, Code: "api.body_wrapper", Level: flow.LevelError,
+				Message: err.Error(), ExpectedFormat: `API body 应使用 schema.properties 的真实字段，不能重复包装 body`,
+			})
+		}
+	}
 	if res.HasErrors() {
 		for _, e := range res.Errors {
 			log.Errorf("agent: validate_flow 校验失败 node=%s code=%s level=%s msg=%s expected=%s", e.NodeID, e.Code, e.Level, e.Message, e.ExpectedFormat)
@@ -396,6 +456,7 @@ func execValidateFlow(ctx *ToolContext) *ToolResult {
 	for _, w := range res.Warnings {
 		log.Warnf("agent: validate_flow 警告 node=%s code=%s msg=%s", w.NodeID, w.Code, w.Message)
 	}
+	log.Infof("agent: 主动 checkpoint/validate_flow 校验完成(valid=%v errors=%d warnings=%d)", !res.HasErrors(), len(res.Errors), len(res.Warnings))
 	out := map[string]any{
 		"valid":    !res.HasErrors(),
 		"errors":   res.Errors,

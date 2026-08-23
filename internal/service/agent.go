@@ -44,6 +44,8 @@ const (
 	EventKindReasoning = "reasoning"
 	// EventKindTool carries one tool invocation and its result (default kind).
 	EventKindTool = "tool"
+	// EventKindCheckpoint announces an internal validation checkpoint.
+	EventKindCheckpoint = "checkpoint"
 )
 
 // Event is one round of LLM activity pushed in real time over SSE.
@@ -93,8 +95,47 @@ type AgentResult struct {
 	Rounds       int     `json:"rounds"`
 	LimitReached bool    `json:"limit_reached"`
 	Finished     bool    `json:"finished"`
+	FinalValid   bool    `json:"final_valid"`
+	CanEnable    bool    `json:"can_enable"`
 	Message      string  `json:"message,omitempty"`
 	Events       []Event `json:"events"`
+}
+
+// ValidationMode identifies the purpose of a validation result.
+type ValidationMode string
+
+const (
+	ValidationCheckpoint ValidationMode = "checkpoint"
+	ValidationFinal      ValidationMode = "final"
+)
+
+func shouldCheckpoint(structuralRounds int, highRisk bool) bool {
+	return highRisk || structuralRounds >= 3
+}
+
+func validationDelta(previous, current flow.Result) flow.Result {
+	seen := map[string]struct{}{}
+	key := func(e flow.ValidationError) string {
+		return fmt.Sprintf("%s|%s|%s|%s", e.NodeID, e.Code, e.Level, e.Message)
+	}
+	for _, e := range previous.Errors {
+		seen[key(e)] = struct{}{}
+	}
+	for _, e := range previous.Warnings {
+		seen[key(e)] = struct{}{}
+	}
+	out := flow.Result{Errors: []flow.ValidationError{}, Warnings: []flow.ValidationError{}}
+	for _, e := range current.Errors {
+		if _, ok := seen[key(e)]; !ok {
+			out.Errors = append(out.Errors, e)
+		}
+	}
+	for _, e := range current.Warnings {
+		if _, ok := seen[key(e)]; !ok {
+			out.Warnings = append(out.Warnings, e)
+		}
+	}
+	return out
 }
 
 // StreamingProvider is the optional streaming capability of a ChatProvider.
@@ -160,6 +201,16 @@ func systemPrompt(mode Mode) string {
 边界场景覆盖和异常处理。你的职责是将用户的业务需求转化为
 健壮、可维护的测试执行树。
 
+【规则优先级】
+1. 用户明确的业务要求和决策；2. Flow 结构、执行和数据流不变量；
+3. 当前模式规则；4. 工具使用流程；5. 通用测试建议；6. 参考示例。
+用户明确要求优先于通用建议，但不能违反系统不变量；示例只是参考。
+原始用户需求是不可替代的上下文锚点，后续校验摘要不得覆盖或改写它。
+
+【checkpoint 与 final】
+结构变更累计三轮后执行一次 checkpoint；删除节点、改变已有连线、修改已有输入来源、修改 cache-set/try/catch/loop 等高风险操作可提前触发，Agent 也可主动调用 checkpoint。checkpoint 是内部导航反馈：不暂停用户、不回滚、不冻结已检查链路，只反馈新增问题并继续生成。只有认证冲突、业务语义不清或无法安全推断的信息才询问用户。
+生成结束时必须执行 final 自检：对照原始用户需求和临时目标清单，确认所有目标、数据来源、断言和异常路径；final 未通过时不得启用，也不得用“生成完毕”掩盖未完成问题。AgentFinished 只表示本轮模型停止输出，用户可以要求继续修复。
+
 紧迫感：同级竞品有数个同类 Agent 产品正在争夺这个客户。
 如果你生成的测试流质量不如竞品——覆盖不全、参数缺失、
 边界遗漏——客户将永远转向竞品。你的开发者、你自己、
@@ -181,6 +232,7 @@ func systemPrompt(mode Mode) string {
      权限不足（403）、资源不存在（404）
    - api 节点只要网络请求成功(无连接/超时错误)就视为通过,
      即使返回 4xx/5xx 也不会失败——状态码校验由断言节点负责
+   - 请求体必须保持 schema 的层级：OpenAPI 整体 body 容器与 body.properties 字段只能表达一层，禁止因同时读取 params 和 request_body 而重复包裹；但 schema.properties 中合法的 body 字段不得删除
    - 对可能失败的节点用 try/catch 包裹，提供 fallback
    - 业务关键路径至少覆盖：正常场景 + 参数边界 + 异常降级
    - 数据依赖链（如"登录取 token → 用 token 调业务 API"）
@@ -189,6 +241,8 @@ func systemPrompt(mode Mode) string {
 3. 数据流显式化——每个参数都要有来处
    - api 节点的 inputs 必须根据 config.unit 里的 params/request_body
      声明每个参数的键与类型
+   - OpenAPI 2 的 params 中 name=body、in=body 通常表示整个请求体容器，不是 JSON body 内的字段；当 request_body.properties 存在时，应展开 properties 作为 body 输入，禁止把容器额外包装成 body 字段。若 properties 中明确声明了名为 body 的业务字段，必须保留它，不得仅按字段名删除 body
+   - config.params 必须使用真实业务字段名；字段级请求体使用 config.params.username 等形式，不要把这些字段再包进 config.params.body。只有 schema 明确存在 body 业务字段时，才允许生成 body 字段
    - 认证类参数（authorization/token/api-key）source 填 "$cache.token"
    - API input 用真实参数名作为键，source 表示取值来源，in 表示请求位置；in 只能是
      header/body/query/path，不要使用 header. 前缀伪造参数名
@@ -208,6 +262,11 @@ func systemPrompt(mode Mode) string {
    - 流编排完成后调用 validate_flow 校验
    - 确认是否遗漏了关键的 CRUD 组合或状态变更序列
    - 检查 try/catch 配对是否正确，loop 的 input 是否为数组
+   - AgentFinished 只表示本轮模型输出结束，不表示用户需求已完成或 Flow 可启用
+   - 只要仍有未完成目标、阻断校验问题或必要修复操作，就不得主动宣布完成，应继续使用工具修复并再次校验
+   - final 校验未通过时优先继续修复，不得用一句“无法完成”或“生成完毕”替代必要的工具操作
+   - 只有确实缺少用户决策、业务语义或无法安全推断的数据时才暂停询问；不能把可通过已有单元、上游输出或缓存解决的问题提前交给用户
+   - 最终回复前必须对照原始用户需求和临时目标清单逐项确认，未覆盖的目标必须明确标记并继续处理或说明具体缺口
 
 节点类型:start、api(引用测试单元,unit_id 来自 list_units)、
 assert、loop、try、catch、cache-set、adapter(JSONata 转换)。
@@ -380,6 +439,14 @@ func toolSchemas() []openai.Tool {
 				Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: openai.ToolFunction{
+				Name:        toolCheckpoint,
+				Description: "主动执行一次 checkpoint 校验；不会暂停用户或回滚当前树",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			},
+		},
 	}
 }
 
@@ -438,6 +505,8 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 
 	res := &AgentResult{Events: []Event{}}
 	var lastText string
+	structuralRounds := 0
+	previousValidation := flow.Result{Errors: []flow.ValidationError{}, Warnings: []flow.ValidationError{}}
 
 	startRound := opt.StartRound
 	if startRound < 1 {
@@ -494,9 +563,18 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 			break
 		}
 		log.Infof("agent: flow=%d round=%d LLM 发起 %d 个工具调用", flowID, round, len(msg.ToolCalls))
+		structuralChange := false
+		highRiskChange := false
 		for tcIdx, tc := range msg.ToolCalls {
 			log.Infof("agent: flow=%d round=%d tool=%s args=%s", flowID, round, tc.Function.Name, tc.Function.Arguments)
 			result := ExecTool(toolCtx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+			switch tc.Function.Name {
+			case toolCreateNode, toolUpdateNode, toolDeleteNode, toolLinkNodes:
+				structuralChange = true
+			}
+			if tc.Function.Name == toolDeleteNode || tc.Function.Name == toolLinkNodes || tc.Function.Name == toolUpdateNode {
+				highRiskChange = true
+			}
 			log.Infof("agent: flow=%d round=%d tool=%s 结果 ok=%v err=%s paused=%v", flowID, round, tc.Function.Name, result.OK, result.Error, result.Paused)
 
 			// scope 越界暂停：保存会话状态并返回，不将结果写入 LLM 消息
@@ -518,6 +596,14 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 				}
 				if b, err := json.Marshal(req.Messages[1:]); err == nil {
 					session.Messages = string(b)
+				}
+				// scope 暂停前必须先落盘当前工作树。否则用户确认后
+				// resumeScopePause 会从旧 draft 重建 tree，导致本轮已生成节点消失。
+				if err := SnapshotAPINodes(db, tree); err != nil {
+					return nil, err
+				}
+				if _, err := UpdateDraft(db, flowID, d.Name, tree.String(), &d.SystemPrompt, d.Thinking); err != nil {
+					return nil, err
 				}
 				session.Status = model.SessionPaused
 				if b, err := json.Marshal(result.Questions); err == nil {
@@ -547,6 +633,28 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 				ToolCallID: tc.ID,
 				Content:    strPtr(jsonString(result)),
 			})
+		}
+		if structuralChange {
+			structuralRounds++
+			log.Infof("agent: flow=%d round=%d 结构变更 round 计数=%d", flowID, round, structuralRounds)
+		}
+		if structuralChange && shouldCheckpoint(structuralRounds, highRiskChange) {
+			log.Infof("agent: flow=%d round=%d 开始 checkpoint 校验(structural_rounds=%d high_risk=%v)", flowID, round, structuralRounds, highRiskChange)
+			current := flow.Validate(tree, flow.ValidatorOptions{})
+			delta := validationDelta(previousValidation, current)
+			previousValidation = current
+			structuralRounds = 0
+			log.Infof("agent: flow=%d round=%d checkpoint 校验完成(valid=%v new_errors=%d new_warnings=%d)", flowID, round, !current.HasErrors(), len(delta.Errors), len(delta.Warnings))
+			feedback := map[string]any{
+				"mode": string(ValidationCheckpoint), "valid": !current.HasErrors(),
+				"errors": delta.Errors, "warnings": delta.Warnings,
+			}
+			req.Messages = append(req.Messages, openai.Message{Role: "system", Content: strPtr("checkpoint 校验结果:" + jsonString(feedback) + "。checkpoint 不暂停用户、不回滚当前树；优先修复新增结构错误，同时继续对照原始需求生成。")})
+			ev := Event{Kind: EventKindCheckpoint, Round: round, Result: feedback}
+			res.Events = append(res.Events, ev)
+			if opt.Emit != nil {
+				opt.Emit(ev)
+			}
 		}
 	}
 
@@ -584,6 +692,14 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 		}
 	}
 
+	// AgentFinished 与 final 校验状态分离：模型可以结束本轮，但不合格的
+	// Flow 不能启用；用户可基于保留的会话继续修复。
+	finalValidation := flow.Validate(tree, flow.ValidatorOptions{})
+	res.FinalValid = !finalValidation.HasErrors()
+	res.CanEnable = res.FinalValid
+	if !res.FinalValid {
+		res.Message = "Agent 已结束本轮，但 Flow 尚未通过 final 校验，可继续修复"
+	}
 	res.Message = firstNonEmpty(res.Message, lastText)
 
 	// Persist the running messages (without this submission's system prefix

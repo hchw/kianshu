@@ -238,10 +238,11 @@ func RenameFlow(db *gorm.DB, flowID uint, name string) (*model.TestFlow, error) 
 // swaggerParam is one parameter entry parsed from a unit's Params JSON array
 // (OpenAPI 2.0 format).
 type swaggerParam struct {
-	Name     string `json:"name"`
-	In       string `json:"in"`
-	Type     string `json:"type"`
-	Required bool   `json:"required"`
+	Name     string          `json:"name"`
+	In       string          `json:"in"`
+	Type     string          `json:"type"`
+	Required bool            `json:"required"`
+	Schema   json.RawMessage `json:"schema"`
 }
 
 // swaggerSchema is a JSON Schema subset extracted from a request_body.
@@ -257,41 +258,59 @@ type swaggerSchema struct {
 func deriveInputs(unit model.TestUnit) map[string]flow.IOKey {
 	io := map[string]flow.IOKey{}
 
-	// 解析 params JSON 数组
+	// OpenAPI 3 或导入后的独立 request_body schema。
+	var bodySchema swaggerSchema
+	bodySchemaOK := false
+	if strings.TrimSpace(unit.RequestBody) != "" && unit.RequestBody != "null" {
+		if err := json.Unmarshal([]byte(unit.RequestBody), &bodySchema); err != nil {
+			log.Warnf("deriveInputs: 解析 unit %d request_body 失败: %v", unit.ID, err)
+		} else {
+			bodySchemaOK = len(bodySchema.Properties) > 0
+		}
+	}
+
+	// 解析 params JSON 数组。OpenAPI 2 的 name=body/in=body 代表整体
+	// 请求体容器，不是 JSON body 中名为 body 的字段。
 	if strings.TrimSpace(unit.Params) != "" && unit.Params != "null" {
 		var params []swaggerParam
 		if err := json.Unmarshal([]byte(unit.Params), &params); err != nil {
 			log.Warnf("deriveInputs: 解析 unit %d params 失败: %v", unit.ID, err)
 		} else {
 			for _, p := range params {
+				if p.In == "body" && p.Name == "body" && bodySchemaOK {
+					continue
+				}
 				key := swaggerTypeToIO(p.Type)
 				src := ""
 				if isAuthKey(p.Name) {
 					src = "$cache.token"
 				}
 				io[p.Name] = flow.IOKey{Type: key, Source: src, In: p.In}
+
+				// 兼容只有 params[].schema、没有 request_body 的 OpenAPI 2 文档。
+				if p.In == "body" && len(p.Schema) > 0 && !bodySchemaOK {
+					var schema swaggerSchema
+					if err := json.Unmarshal(p.Schema, &schema); err == nil && len(schema.Properties) > 0 {
+						bodySchema, bodySchemaOK = schema, true
+						delete(io, p.Name)
+					}
+				}
 			}
 		}
 	}
 
-	// 解析 request_body JSON schema
-	if strings.TrimSpace(unit.RequestBody) != "" && unit.RequestBody != "null" {
-		var schema swaggerSchema
-		if err := json.Unmarshal([]byte(unit.RequestBody), &schema); err != nil {
-			log.Warnf("deriveInputs: 解析 unit %d request_body 失败: %v", unit.ID, err)
-		} else {
-			for propName, prop := range schema.Properties {
-				// 跳过已存在的 key（params 优先）
-				if _, exists := io[propName]; exists {
-					continue
-				}
-				key := swaggerTypeToIO(prop.Type)
-				src := ""
-				if isAuthKey(propName) {
-					src = "$cache.token"
-				}
-				io[propName] = flow.IOKey{Type: key, Source: src, In: "body"}
+	// properties 中明确声明的 body 是合法业务字段，不能删除。
+	if bodySchemaOK {
+		for propName, prop := range bodySchema.Properties {
+			if _, exists := io[propName]; exists {
+				continue
 			}
+			key := swaggerTypeToIO(prop.Type)
+			src := ""
+			if isAuthKey(propName) {
+				src = "$cache.token"
+			}
+			io[propName] = flow.IOKey{Type: key, Source: src, In: "body"}
 		}
 	}
 
