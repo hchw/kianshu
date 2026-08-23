@@ -682,10 +682,14 @@ definitions:
     type: object
   service.AgentResult:
     properties:
+      can_enable:
+        type: boolean
       events:
         items:
           $ref: '#/definitions/service.Event'
         type: array
+      final_valid:
+        type: boolean
       finished:
         type: boolean
       limit_reached:

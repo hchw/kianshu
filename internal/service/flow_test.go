@@ -78,6 +78,33 @@ func TestDeriveInputs(t *testing.T) {
 	}
 }
 
+func TestDeriveInputsSkipsBodyContainerButKeepsBusinessBody(t *testing.T) {
+	u := model.TestUnit{
+		Params:      `[{"name":"body","in":"body","type":"object"}]`,
+		RequestBody: `{"type":"object","properties":{"username":{"type":"string"},"body":{"type":"object"}}}`,
+	}
+	io := deriveInputs(u)
+	if _, ok := io["body"]; !ok {
+		t.Fatal("schema body property must be preserved")
+	}
+	if _, ok := io["username"]; !ok {
+		t.Fatal("request body property must be derived")
+	}
+}
+
+func TestDeriveInputsBodySchemaFromSwaggerParam(t *testing.T) {
+	u := model.TestUnit{
+		Params: `[{"name":"body","in":"body","type":"object","schema":{"type":"object","properties":{"username":{"type":"string"}}}}]`,
+	}
+	io := deriveInputs(u)
+	if _, ok := io["body"]; ok {
+		t.Fatal("body container must not become a body field")
+	}
+	if _, ok := io["username"]; !ok {
+		t.Fatal("body schema property must be derived")
+	}
+}
+
 func TestDeriveInputsEmptyAndNull(t *testing.T) {
 	tests := []struct {
 		name   string

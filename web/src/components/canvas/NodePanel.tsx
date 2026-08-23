@@ -24,6 +24,8 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
   const [removedOutputs, setRemovedOutputs] = useState<Set<string>>(new Set())
   const [sourceOverrides, setSourceOverrides] = useState<Record<string, string>>({})
   const [unit, setUnit] = useState<TestUnit | null>(null)
+  const [jsonDrafts, setJsonDrafts] = useState<Record<string, string>>({})
+  const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!node) return
@@ -32,6 +34,8 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
     setRemovedInputs(new Set())
     setRemovedOutputs(new Set())
     setSourceOverrides({})
+    setJsonDrafts({})
+    setJsonErrors({})
     const ins: Record<string, string> = {}
     for (const [k, v] of Object.entries(node.inputs ?? {})) ins[k] = v.desc ?? ''
     setInputs(ins)
@@ -52,10 +56,26 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
 
   if (!node) return null
 
+  const parseJsonDrafts = (): Record<string, unknown> | null => {
+    const parsed: Record<string, unknown> = {}
+    for (const [key, raw] of Object.entries(jsonDrafts)) {
+      try {
+        parsed[key] = JSON.parse(raw)
+      } catch {
+        setJsonErrors((e) => ({ ...e, [key]: 'JSON 格式错误，请修正后再保存' }))
+        return null
+      }
+    }
+    return parsed
+  }
+
   const save = () => {
+    const parsedDrafts = parseJsonDrafts()
+    if (!parsedDrafts) return
     const next: FlowTree = JSON.parse(JSON.stringify(tree))
     const n = next.nodes[nodeID]
-    n.config = config
+    const nextConfig = { ...config, ...parsedDrafts }
+    n.config = nextConfig
     // API 节点：若用户编辑过来源（inputsOverride），回写 node.inputs（保留 type/desc）
     if (node.type === 'api' && inputsOverride) {
       const ins: Record<string, IOKey> = {}
@@ -87,6 +107,27 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
   }
 
   const setKV = (field: string, value: unknown) => setConfig((c) => ({ ...c, [field]: value }))
+  const jsonValue = (field: string, fallback: unknown): string =>
+    jsonDrafts[field] ?? (config[field] !== undefined ? JSON.stringify(config[field]) : JSON.stringify(fallback))
+  const updateJsonDraft = (field: string, raw: string) => {
+    setJsonDrafts((d) => ({ ...d, [field]: raw }))
+    try {
+      setKV(field, JSON.parse(raw))
+      setJsonErrors((e) => ({ ...e, [field]: '' }))
+    } catch {
+      setJsonErrors((e) => ({ ...e, [field]: 'JSON 格式错误，离开输入框或保存前请修正' }))
+    }
+  }
+  const blurJsonDraft = (field: string) => {
+    const raw = jsonDrafts[field]
+    if (raw === undefined) return
+    try {
+      setKV(field, JSON.parse(raw))
+      setJsonErrors((e) => ({ ...e, [field]: '' }))
+    } catch {
+      setJsonErrors((e) => ({ ...e, [field]: 'JSON 格式错误，请修正后再保存' }))
+    }
+  }
 
   // I/O contract section: for API nodes, show read-only auto-populated inputs;
   // for other types, keep the editable inputs/outputs.
@@ -304,15 +345,11 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
           <label>
             fallback (JSON)
             <input
-              value={config.fallback !== undefined ? JSON.stringify(config.fallback) : ''}
-              onChange={(e) => {
-                try {
-                  setKV('fallback', JSON.parse(e.target.value))
-                } catch {
-                  /* keep last valid */
-                }
-              }}
+              value={jsonValue('fallback', '')}
+              onChange={(e) => updateJsonDraft('fallback', e.target.value)}
+              onBlur={() => blurJsonDraft('fallback')}
             />
+            {jsonErrors.fallback && <div className="err small">{jsonErrors.fallback}</div>}
           </label>
         )
       case 'cache-set':
@@ -322,29 +359,21 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
               writes (JSON: key → value)
               <textarea
                 rows={5}
-                value={config.writes ? JSON.stringify(config.writes) : '{}'}
-                onChange={(e) => {
-                  try {
-                    setKV('writes', JSON.parse(e.target.value))
-                  } catch {
-                    /* keep last valid */
-                  }
-                }}
+                value={jsonValue('writes', {})}
+                onChange={(e) => updateJsonDraft('writes', e.target.value)}
+                onBlur={() => blurJsonDraft('writes')}
               />
+              {jsonErrors.writes && <div className="err small">{jsonErrors.writes}</div>}
             </label>
             <label>
               static (JSON, 固定字符串值)
               <textarea
                 rows={3}
-                value={config.static ? JSON.stringify(config.static) : '{}'}
-                onChange={(e) => {
-                  try {
-                    setKV('static', JSON.parse(e.target.value))
-                  } catch {
-                    /* keep last valid */
-                  }
-                }}
+                value={jsonValue('static', {})}
+                onChange={(e) => updateJsonDraft('static', e.target.value)}
+                onBlur={() => blurJsonDraft('static')}
               />
+              {jsonErrors.static && <div className="err small">{jsonErrors.static}</div>}
             </label>
             <div className="muted small">
               上游 API 节点输出信封 {'{'}"status_code":200,"body":...{'}'}。
@@ -360,15 +389,11 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
             params (JSON)
             <textarea
               rows={4}
-              value={config.params ? JSON.stringify(config.params) : '{}'}
-              onChange={(e) => {
-                try {
-                  setKV('params', JSON.parse(e.target.value))
-                } catch {
-                  /* keep last valid */
-                }
-              }}
+              value={jsonValue('params', {})}
+              onChange={(e) => updateJsonDraft('params', e.target.value)}
+              onBlur={() => blurJsonDraft('params')}
             />
+            {jsonErrors.params && <div className="err small">{jsonErrors.params}</div>}
           </label>
         )
       default:
