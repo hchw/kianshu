@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { FlowTree, IOKey } from '../../api/flow'
 
-vi.mock('../../api/testset', () => ({ getUnit: () => Promise.resolve(null) }))
+vi.mock('../../api/testset', () => ({ getUnit: () => Promise.resolve(null), listUnits: () => Promise.resolve([]) }))
 
 import NodePanel from './NodePanel'
 

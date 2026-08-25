@@ -19,6 +19,8 @@ interface Props {
   initialThinking?: string
   onChanged: () => void
   onTreePreview: (t: FlowTree) => void
+  selectedNodeIDs?: string[]
+  onSelectedNodeIDsChange?: (ids: string[]) => void
 }
 
 interface Message {
@@ -28,7 +30,7 @@ interface Message {
   tool_call_id?: string
 }
 
-export default function AgentDialog({ flowID, providers, tree, systemPrompt, initialThinking, onChanged, onTreePreview }: Props) {
+export default function AgentDialog({ flowID, providers, tree, systemPrompt, initialThinking, onChanged, onTreePreview, selectedNodeIDs, onSelectedNodeIDsChange }: Props) {
   const [providerID, setProviderID] = useState(0)
   const [instruction, setInstruction] = useState('')
   const [mode, setMode] = useState<'edit' | 'generate'>('generate')
@@ -42,7 +44,14 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, ini
       setThinking(initialThinking ?? 'disabled')
     }
   }, [initialThinking])
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected] = useState<string[]>(selectedNodeIDs ?? [])
+  useEffect(() => {
+    if (selectedNodeIDs) setSelected(selectedNodeIDs)
+  }, [selectedNodeIDs])
+  const updateSelected = (ids: string[]) => {
+    setSelected(ids)
+    onSelectedNodeIDsChange?.(ids)
+  }
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [questions, setQuestions] = useState<PauseQuestion[]>([])
@@ -472,7 +481,7 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, ini
       <div className="node-tags">
         <button
           className={selected.length === nodeIDs.length ? 'tag on' : 'tag'}
-          onClick={() => setSelected(nodeIDs.length ? [...nodeIDs] : [])}
+          onClick={() => updateSelected(nodeIDs.length ? [...nodeIDs] : [])}
         >
           全部
         </button>
@@ -480,7 +489,7 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, ini
           <button
             key={id}
             className={selected.includes(id) ? 'tag on' : 'tag'}
-            onClick={() => toggleNode(id)}
+            onClick={() => { toggleNode(id); onSelectedNodeIDsChange?.(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]) }}
             title={id}
           >
             {NODE_LABELS[tree.nodes[id]?.type ?? ''] ?? tree.nodes[id]?.type} · {id}

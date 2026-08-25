@@ -981,7 +981,7 @@ h3 {
   --xy-handle-background-color: var(--surface);
   --xy-handle-border-color: var(--primary);
   --xy-selection-background-color: var(--select-bg);
-  --xy-selection-border: var(--primary);
+  --xy-selection-border: var(--ok);
   --xy-controls-background-color: var(--elevated);
   --xy-controls-border-color: var(--border);
   --xy-controls-button-background-color: var(--elevated);
@@ -1050,6 +1050,12 @@ h3 {
 
 .react-flow__node.flow-node:hover {
   box-shadow: var(--shadow-md);
+}
+
+/* 单选节点用绿色光晕强调；多选时 React Flow 仍保留外围选择框，
+   同时让框内节点也保持一致的绿色高亮。 */
+.react-flow__node.flow-node.selected {
+  box-shadow: 0 0 0 2px var(--ok), 0 0 14px 4px rgba(34, 197, 94, 0.55) !important;
 }
 
 /* 节点执行状态指示点（右上角） */

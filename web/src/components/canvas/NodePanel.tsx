@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FlowTree, FlowNode, IOKey } from '../../api/flow'
 import { NODE_LABELS } from '../../lib/tree'
-import { getUnit, type TestUnit } from '../../api/testset'
+import { getUnit, listUnits, type TestUnit } from '../../api/testset'
 import PopConfirm from '../dialog/PopConfirm'
 
 interface Props {
@@ -24,6 +24,7 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
   const [removedOutputs, setRemovedOutputs] = useState<Set<string>>(new Set())
   const [sourceOverrides, setSourceOverrides] = useState<Record<string, string>>({})
   const [unit, setUnit] = useState<TestUnit | null>(null)
+  const [units, setUnits] = useState<TestUnit[]>([])
   const [jsonDrafts, setJsonDrafts] = useState<Record<string, string>>({})
   const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({})
 
@@ -44,12 +45,18 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
     setOutputs(outs)
 
     const unitID = Number(node.config && typeof node.config === 'object' ? (node.config as Record<string, unknown>).unit_id ?? 0 : 0)
-    if (node.type === 'api' && testSetID && unitID) {
+    if (node.type === 'api' && testSetID) {
       setUnit(null)
-      getUnit(testSetID, unitID)
-        .then(setUnit)
-        .catch(() => setUnit(null))
+      listUnits(testSetID)
+        .then((items) => {
+          setUnits(items)
+          const selected = items.find((item) => item.id === unitID)
+          if (selected) setUnit(selected)
+          else if (unitID) getUnit(testSetID, unitID).then(setUnit).catch(() => setUnit(null))
+        })
+        .catch(() => { setUnits([]); setUnit(null) })
     } else {
+      setUnits([])
       setUnit(null)
     }
   }, [nodeID, node, testSetID])
@@ -231,12 +238,21 @@ export default function NodePanel({ tree, nodeID, onTreeChange, onSaved, onDelet
         return (
           <>
             <label>
-              unit_id
-              <input
-                type="number"
+              接口
+              <select
+                aria-label="API 接口"
                 value={Number(config.unit_id ?? 0)}
-                onChange={(e) => setKV('unit_id', Number(e.target.value))}
-              />
+                onChange={(e) => {
+                  const id = Number(e.target.value)
+                  setKV('unit_id', id)
+                  setUnit(units.find((item) => item.id === id) ?? null)
+                }}
+              >
+                <option value={0}>请选择接口</option>
+                {units.map((item) => (
+                  <option key={item.id} value={item.id}>{item.method} {item.path} · {item.name || item.slug}</option>
+                ))}
+              </select>
             </label>
             <details className="mono small" open={false}>
               <summary>Swagger 原始定义（只读）</summary>
@@ -576,7 +592,7 @@ export function groupApiParams(
 ): Record<string, ApiParamRow[]> {
   const locations = parseParamLocations(unitParams)
   const groups: Record<string, ApiParamRow[]> = {}
-  for (const g of GROUP_ORDER) groups[g] = []
+  for (const group of GROUP_ORDER) groups[group] = []
 
   const addRow = (key: string, declIn: string, partial: Partial<ApiParamRow>) => {
     const g = groupOf(declIn)
@@ -595,7 +611,8 @@ export function groupApiParams(
   }
   // 2) config.params：按 swagger 声明定位分组
   for (const [k, v] of Object.entries(params)) {
-    addRow(k, locations[k] ?? '', { value: v, hasValue: true })
+    // 扁平 body 字段优先使用输入绑定的位置，避免同名字段落入 default 后重复显示。
+    addRow(k, inputs[k]?.in ?? locations[k] ?? '', { value: v, hasValue: true })
   }
   // 3) Swagger 已声明参数也要保留为行：清除覆盖值时不能把参数条目误删。
   // 这些参数可能尚未建立 inputs/source，但仍应允许用户继续编辑或选择来源。
@@ -605,12 +622,11 @@ export function groupApiParams(
   }
   // 4) node.inputs：连线来源（source），合并进对应行（若已存在）或新增
   for (const [k, io] of Object.entries(inputs)) {
-    const g = groupOf(io.in ?? locations[k] ?? '')
-    const existing = groups[g].find((r) => r.key === k)
+    const existing = GROUP_ORDER.flatMap((name) => groups[name]).find((r) => r.key === k)
     if (existing) {
       existing.source = io.source
     } else {
-      addRow(k, locations[k] ?? '', { source: io.source })
+      addRow(k, io.in ?? locations[k] ?? '', { source: io.source })
     }
   }
   return groups
@@ -641,6 +657,8 @@ function ApiParamsEditor({
 }) {
   const candidates = resolveSourceCandidates(tree, nodeID)
   const groups = groupApiParams(params, headers, inputs, unit?.params ?? unitParams)
+  const [valueModes, setValueModes] = useState<Record<string, 'fixed' | 'output' | 'cache'>>({})
+  useEffect(() => setValueModes({}), [nodeID])
 
   const parse = (raw: string): unknown => {
     const trimmed = raw.trim()
@@ -666,11 +684,6 @@ function ApiParamsEditor({
   const setLocation = (key: string, loc: string) => {
     const orig = inputs[key] ?? {}
     onInputsChange({ ...inputs, [key]: { ...orig, type: orig.type ?? 'primitive', in: loc as IOKey['in'] } })
-  }
-  const removeBinding = (key: string) => {
-    const next = { ...inputs }
-    delete next[key]
-    onInputsChange(next)
   }
   // 更新覆盖值（按通道落点）：header/secret → config.headers，其余 → config.params；空值视为清除覆盖
   const setValue = (key: string, raw: string, channel: 'params' | 'headers') => {
@@ -723,8 +736,9 @@ function ApiParamsEditor({
       if (!(key in params)) onParamsChange({ ...params, [key]: parse(draftValue) })
       if (!(key in inputs)) onInputsChange({ ...inputs, [key]: { type: 'primitive', source: '' } })
     } else {
-      // query/body/path/其他 → 写入 config.params（启发式或 declared 定位）
+      // query/body/path → 写入固定值，同时记录位置，确保后续切换为引用时参数不会丢失。
       if (!(key in params)) onParamsChange({ ...params, [key]: parse(draftValue) })
+      if (!(key in inputs)) onInputsChange({ ...inputs, [key]: { type: 'primitive', source: '', in: draftLoc as IOKey['in'] } })
     }
     setDraftName('')
     setDraftValue('')
@@ -736,6 +750,7 @@ function ApiParamsEditor({
     const isHeader = r.group === 'header' || r.group === 'secret'
     const hasOverride = isHeader ? r.key in headers && headers[r.key] !== null : r.hasValue
     const curVal = isHeader ? headers[r.key] : r.value
+    const mode = valueModes[r.key] ?? (hasOverride ? 'fixed' : r.source?.startsWith('$cache.') ? 'cache' : r.source ? 'output' : 'fixed')
     return (
       <div key={r.key} className="param-row row" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
         <span className="mono small param-key" title={r.declared ? `swagger ${r.declaredIn}` : '未在 swagger 声明'}>
@@ -745,11 +760,33 @@ function ApiParamsEditor({
         {inputs[r.key] && <select className="small" aria-label={`input ${r.key} location`} value={inputs[r.key].in ?? r.declaredIn ?? 'body'} onChange={(e) => setLocation(r.key, e.target.value)}>
           <option value="header">header</option><option value="body">body</option><option value="query">query</option><option value="path">path</option>
         </select>}
-        <SourceAutocomplete
+        <select
+          className="small"
+          aria-label={`value mode ${r.key}`}
+          value={mode}
+          onChange={(e) => {
+            const next = e.target.value as 'fixed' | 'output' | 'cache'
+            setValueModes((current) => ({ ...current, [r.key]: next }))
+            if (next === 'fixed') {
+              setSource(r.key, '')
+            } else {
+              // 先建立空的输入绑定再清除固定值，避免未声明参数从规范化列表消失。
+              if (!inputs[r.key]) {
+                onInputsChange({ ...inputs, [r.key]: { type: 'primitive', source: '', in: (r.declaredIn || (r.group === 'default' ? 'body' : r.group)) as IOKey['in'] } })
+              }
+              setValue(r.key, '', isHeader ? 'headers' : 'params')
+            }
+          }}
+        >
+          <option value="fixed">固定值</option>
+          <option value="output">上游输出</option>
+          <option value="cache">共享缓存</option>
+        </select>
+        {mode !== 'fixed' && <SourceAutocomplete
           value={r.source ?? ''}
-          candidates={candidates}
-          onSelect={(v) => setSource(r.key, v, isHeader ? 'header' : undefined)} data-source-key={r.key} />
- <input
+          candidates={candidates.filter((candidate) => mode !== 'cache' || candidate.startsWith('$cache.'))}
+          onSelect={(v) => setSource(r.key, v, isHeader ? 'header' : undefined)} data-source-key={r.key} />}
+ {mode === 'fixed' && <input
           className={'mono small' + (hasOverride ? ' override' : '')}
           placeholder={isHeader ? '覆盖头 (可选,留空用来源)' : '覆盖值 (可选,留空用来源)'}
           value={hasOverride ? displayVal(curVal) : ''}
@@ -757,9 +794,8 @@ function ApiParamsEditor({
           data-param-key={r.key}
           style={{ flex: 1, minWidth: 120 }}
           title={hasOverride ? (isHeader ? '已覆盖为显式请求头' : '已覆盖来源值') : ''}
-        />
+        />}
         {hasOverride && <span className="badge">已覆盖</span>}
-        {inputs[r.key] && <button className="link danger small" onClick={() => removeBinding(r.key)} title="删除当前输入绑定">删除绑定</button>}
         {!r.declared && (
           <button className="link danger small" onClick={() => removeUndeclared(r.key)} title="删除此参数">
             删除

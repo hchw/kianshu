@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 vi.mock('../../api/testset', () => ({
   getUnit: () => Promise.resolve(null),
+ listUnits: () => Promise.resolve([]),
 }))
 
 import type { FlowTree } from '../../api/flow'
