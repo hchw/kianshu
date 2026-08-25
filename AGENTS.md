@@ -2,7 +2,15 @@
 
 ## Project Overview
 
-Kianshu (鉴枢) is an AI-driven integration-testing platform. Users import a Swagger/OpenAPI document to generate test units, then an LLM agent produces **executable, human-editable tree-shaped test flows** ("flow trees"). Each tree is made of typed nodes (start, api, assert, loop, try/catch, cache-set, adapter), supports draft trial runs, immutable version snapshots, and cron scheduling.
+鉴枢（Kianshu）是一个 AI 驱动的接口集成测试平台，解决多接口业务链路测试难编写、难维护、难复现的问题。用户导入 Swagger/OpenAPI 文档，描述测试目标，由 LLM 生成可执行、可人工编辑的树形测试流；测试流可先试运行，再保存为版本，并用于历史复现和定时回归。
+
+产品价值与使用路径：
+- 从接口文档自动整理测试单元，减少手工拼接请求、认证和上下游参数的工作量。
+- 用显式数据传递、断言、循环和异常分支表达真实业务链路，同时保留人工检查和修改能力。
+- 通过节点级结果、版本快照和执行日志提升失败定位、团队协作和回归追踪效率。
+- 基本流程：创建测试集 → 导入 Swagger/OpenAPI → 配置 OpenAI-compatible Provider → 描述目标并生成流 → 试运行 → 保存启用 → 查看日志或配置 Cron。
+
+开发和验证时请以 `README.md` 的用户说明为准；以下内容是实现代码时必须保持的内部约束。
 
 Design invariants (from `tsc.md` / `README.md` — do not violate):
 - **Tree + shared-cache bypass**: one tree, one start node per flow; cross-layer data passes through an explicit shared cache.

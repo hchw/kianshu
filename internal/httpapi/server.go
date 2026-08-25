@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -150,6 +151,31 @@ func (s *Server) Routes() *gin.Engine {
 
 		auth.POST("/utils/cron/describe", s.handleDescribeCron)
 		auth.POST("/utils/sign", s.signAuth(), s.handleSign)
+	}
+
+	// 发布包使用 web-dist，开发环境使用 web/dist。
+	frontendDir := "web-dist"
+	if _, err := os.Stat(frontendDir); os.IsNotExist(err) {
+		frontendDir = "web/dist"
+	}
+	if _, err := os.Stat(frontendDir); err == nil {
+		// 不能将 StaticFS 注册到根路径，否则会与 /api 的路由冲突。
+		// Vite 生成的静态资源默认位于 assets 目录；其余前端路由交给 SPA fallback。
+		r.StaticFS("/assets", gin.Dir(frontendDir+"/assets", false))
+		// public 目录下的文件会被 Vite 原样复制到 dist 根目录。
+		for _, name := range []string{"kianshu.png", "main.png", "icons.svg", "favicon.svg"} {
+			r.StaticFile("/"+name, frontendDir+"/"+name)
+		}
+		r.GET("/", func(c *gin.Context) {
+			c.File(frontendDir + "/index.html")
+		})
+		r.NoRoute(func(c *gin.Context) {
+			if c.Request.Method == http.MethodGet {
+				c.File(frontendDir + "/index.html")
+				return
+			}
+			c.Status(http.StatusNotFound)
+		})
 	}
 
 	return r
