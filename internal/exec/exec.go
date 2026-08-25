@@ -37,11 +37,11 @@ const (
 
 // APICall describes one outbound HTTP call performed by an api node.
 type APICall struct {
-	Method  string
-	URL     string
-	Headers map[string]string
-	Query   map[string]any
-	Body    any
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Query   map[string]any    `json:"query,omitempty"`
+	Body    any               `json:"body,omitempty"`
 }
 
 // APIResponse is the structured result of an HTTP call: the status code and
@@ -55,6 +55,7 @@ type APIResponse struct {
 // NodeResult records the outcome of a single node execution.
 type NodeResult struct {
 	NodeID     string    `json:"node_id"`
+	Request    *APICall  `json:"request,omitempty"`
 	Status     Status    `json:"status"`
 	Input      any       `json:"input,omitempty"`
 	Output     any       `json:"output,omitempty"`
@@ -109,6 +110,7 @@ func Run(ctx context.Context, t *flow.Tree, opts Options) (*RunResult, error) {
 		opts:      opts,
 		cache:     map[string]any{},
 		results:   map[string]*NodeResult{},
+		requests:  map[string]*APICall{},
 		doneCatch: map[string]bool{},
 		ctx:       ctx,
 	}
@@ -139,6 +141,7 @@ type engine struct {
 	opts       Options
 	cache      map[string]any
 	results    map[string]*NodeResult
+	requests   map[string]*APICall
 	iterCtx    map[string]any
 	rootStatus Status
 	doneCatch  map[string]bool
@@ -186,11 +189,17 @@ func (e *engine) runNode(id string, parentOut any) Status {
 	out, err := e.execute(n, input)
 	if err != nil {
 		e.record(id, StatusFailed, input, nil, err)
+		if req := e.requests[id]; req != nil {
+			e.results[id].Request = req
+		}
 		e.results[id].StartedAt = started
 		e.results[id].FinishedAt = time.Now()
 		return StatusFailed
 	}
 	e.record(id, StatusOK, input, out, nil)
+	if req := e.requests[id]; req != nil {
+		e.results[id].Request = req
+	}
 	status := StatusOK
 	for _, child := range n.Children {
 		if e.runNode(child, out) == StatusFailed {
@@ -433,6 +442,7 @@ func (e *engine) apiOutput(n *flow.Node, input any) (any, error) {
 	}
 	url := strings.TrimRight(host, "/") + path
 	call := APICall{Method: method, URL: url, Headers: headers, Query: query, Body: body}
+	e.requests[n.ID] = &call
 	log.Printf("[exec] %s %s", method, url)
 	resp, err := e.opts.CallAPI(call)
 	if err != nil {

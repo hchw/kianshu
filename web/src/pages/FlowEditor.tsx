@@ -49,6 +49,7 @@ export default function FlowEditor() {
   const [runsPage, setRunsPage] = useState(1)
   const runsPageSize = 20
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [selectedNodeIDs, setSelectedNodeIDs] = useState<string[]>([])
   // 流级系统提示词文档：随草稿保存，Agent 提交时由后端实时注入系统消息。
   const [systemPrompt, setSystemPrompt] = useState('')
   const [promptOpen, setPromptOpen] = useState(() => localStorage.getItem('kianshu_prompt_open') !== '0')
@@ -81,7 +82,11 @@ export default function FlowEditor() {
     try {
       const d = await getDraft(fid)
       setDraft(d)
-      setTree(parseTree(d.tree))
+      const loadedTree = parseTree(d.tree)
+      // treeRef 用于保存时读取最新树；初始化时也必须同步，否则刚打开
+      // 空画布直接保存会把默认的 start 节点误写成空树。
+      treeRef.current = loadedTree
+      setTree(loadedTree)
       setVersions((await listVersions(fid)) || [])
       const runsResp = await listRuns(fid, 1, runsPageSize)
       setRuns(runsResp.runs || [])
@@ -273,6 +278,7 @@ export default function FlowEditor() {
           tree={tree}
           selected={selectedNode}
           onSelect={setSelectedNode}
+          onSelectionRange={setSelectedNodeIDs}
           onTreeChange={onTreeChange}
           onSaved={() => save()}
           onDelete={handleDeleteNode}
@@ -367,6 +373,8 @@ export default function FlowEditor() {
               initialThinking={draft?.thinking ?? 'disabled'}
               onChanged={() => load()}
               onTreePreview={onTreePreview}
+              selectedNodeIDs={selectedNodeIDs}
+              onSelectedNodeIDsChange={setSelectedNodeIDs}
             />
             <SchedulePanel flowID={fid} />
             <ResultsPanel

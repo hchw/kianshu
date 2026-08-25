@@ -22,6 +22,7 @@ const unit: TestUnit = {
 
 vi.mock('../../api/testset', () => ({
   getUnit: () => Promise.resolve(unit),
+ listUnits: () => Promise.resolve([unit]),
 }))
 
 import NodePanel from './NodePanel'
@@ -55,8 +56,8 @@ function apiTree(): FlowTree {
   }
 }
 
-function findByKey(key: string): HTMLInputElement {
-  return document.querySelector<HTMLInputElement>(`[data-param-key="${key}"]`)!
+function findRow(key: string): HTMLElement {
+  return [...document.querySelectorAll<HTMLElement>('.param-row')].find((row) => row.textContent?.includes(key))!
 }
 
 describe('ApiParamsEditor 位置落点（params=body）', () => {
@@ -77,13 +78,14 @@ describe('ApiParamsEditor 位置落点（params=body）', () => {
     )
     await act(async () => {})
 
-    // header 参数(X-Timestamp)行：在"覆盖头"框填值 → 应落 config.headers
-    const headerOverride = findByKey('X-Timestamp')
-    fireEvent.change(headerOverride, { target: { value: '=sign_ts' } })
+    // 切换固定值模式后，header/body 字段各自写入对应通道
+    const headerRow = findRow('X-Timestamp')
+    fireEvent.change(headerRow.querySelector('select[aria-label="value mode X-Timestamp"]')!, { target: { value: 'fixed' } })
+    fireEvent.change(headerRow.querySelector('input[data-param-key="X-Timestamp"]')!, { target: { value: '=sign_ts' } })
 
-    // body 参数(payload)行：在"覆盖值"框填值 → 应落 config.params
-    const bodyOverride = findByKey('payload')
-    fireEvent.change(bodyOverride, { target: { value: '{"a":1}' } })
+    const bodyRow = findRow('payload')
+    fireEvent.change(bodyRow.querySelector('select[aria-label="value mode payload"]')!, { target: { value: 'fixed' } })
+    fireEvent.change(bodyRow.querySelector('input[data-param-key="payload"]')!, { target: { value: '{"a":1}' } })
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 

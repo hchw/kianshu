@@ -26,6 +26,7 @@ import NodePanel from './NodePanel'
 export interface NodeRunStatus {
   node_id: string
   status: string
+  request?: { method: string; url: string; headers?: Record<string, string>; query?: Record<string, unknown>; body?: unknown }
   input?: unknown
   output?: unknown
   error?: string
@@ -37,6 +38,7 @@ interface Props {
   tree: FlowTree
   selected: string | null
   onSelect: (id: string | null) => void
+  onSelectionRange?: (ids: string[]) => void
   onTreeChange: (t: FlowTree) => void
   onSaved: () => void
   onDelete?: (id: string) => void
@@ -107,7 +109,7 @@ export default function FlowCanvas(props: Props) {
   )
 }
 
-function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete, testSetID, nodeResults }: Props) {
+function CanvasInner({ tree, selected, onSelect, onSelectionRange, onTreeChange, onSaved, onDelete, testSetID, nodeResults }: Props) {
   const deleteNode = onDelete ?? (() => {})
   const [paletteOpen, setPaletteOpen] = useState(() => localStorage.getItem(PALETTE_KEY) !== '0')
   const togglePalette = () =>
@@ -127,6 +129,8 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
   } | null>(null)
   const dotPopoverRef = useRef<HTMLDivElement>(null)
   const skipDotCloseRef = useRef(false)
+
+  const [selectedIDs, setSelectedIDs] = useState<string[]>(selected ? [selected] : [])
 
   // 从 tree 计算节点（仅结构/坐标来源，不含拖拽中间态）
   const treeNodes: Node[] = useMemo(() => {
@@ -148,23 +152,27 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
           nodeResult: nr ?? undefined,
           style: {
             width: 120,
-            borderColor: selected === id ? 'var(--primary)' : 'var(--border)',
-            borderWidth: selected === id ? 2 : 1,
+            borderColor: 'var(--border)',
+            borderWidth: 1,
             borderRadius: 'var(--radius-10)',
             background: 'var(--surface)',
             color: 'var(--text)',
-            boxShadow: selected === id ? 'var(--shadow-md)' : 'var(--shadow-sm)',
+            boxShadow: selected === id
+              ? '0 0 0 2px var(--ok), 0 0 14px 4px rgba(34, 197, 94, 0.55)'
+              : 'var(--shadow-sm)',
           } as unknown as Record<string, string>,
         },
         style: {
           ...({ '--node-color': color } as Record<string, string>),
           width: 120,
-          borderColor: selected === id ? 'var(--primary)' : 'var(--border)',
-          borderWidth: selected === id ? 2 : 1,
+          borderColor: 'var(--border)',
+          borderWidth: 1,
           borderRadius: 'var(--radius-10)',
           background: 'var(--surface)',
           color: 'var(--text)',
-          boxShadow: selected === id ? 'var(--shadow-md)' : 'var(--shadow-sm)',
+          boxShadow: selected === id
+            ? '0 0 0 2px var(--ok), 0 0 14px 4px rgba(34, 197, 94, 0.55)'
+            : 'var(--shadow-sm)',
         },
       }
     })
@@ -234,6 +242,37 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
   useEffect(() => {
     fitView({ padding: 0.2 })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const clearSelection = () => {
+    setSelectedIDs((current) => current.length === 0 ? current : [])
+    onSelectionRange?.([])
+    onSelect(null)
+  }
+
+  const onSelectionChange = ({ nodes: selectedNodes }: { nodes: Node[] }) => {
+    const ids = selectedNodes.map((n) => n.id).sort()
+    // ReactFlow 在普通节点点击后可能先发出一次空选择事件；不能让它立刻覆盖节点面板的单选状态。
+    if (ids.length === 0 && selectedIDs.length === 1) return
+    const prev = [...selectedIDs].sort()
+    if (prev.length === ids.length && prev.every((id, index) => id === ids[index])) return
+    setSelectedIDs(ids)
+  }
+
+  // 框选过程中 ReactFlow 会在每命中一个节点时触发 onSelectionChange。
+  // 这里只更新画布内部选区，等框选结束后再通知父组件，避免每个节点
+  // 都触发 FlowEditor 重渲染并重新同步整棵 nodes 数组。
+  const onSelectionEnd = () => {
+    const ids = selectedIDs
+    onSelectionRange?.(ids)
+    onSelect(ids.length === 1 ? ids[0] : null)
+  }
+
+  const deleteSelected = () => {
+    for (const id of selectedIDs) {
+      if (tree.nodes[id]?.type !== 'start') deleteNode(id)
+    }
+    clearSelection()
+  }
 
   const onNodeDragStop: OnNodeDrag = (_, node) => {
     const n = tree.nodes[node.id]
@@ -364,11 +403,31 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
           onConnect={onConnect}
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
-          onNodeClick={(_, n) => onSelect(n.id)}
-          onPaneClick={() => onSelect(null)}
+          selectionOnDrag={false}
+          selectionKeyCode="Control"
+          panOnDrag
+          multiSelectionKeyCode="Control"
+          onSelectionChange={onSelectionChange}
+          onSelectionEnd={onSelectionEnd}
+          onNodeClick={(event, n) => {
+            // 普通单击始终打开节点面板；Ctrl 单击交给 ReactFlow 管理多选。
+            if (!event.ctrlKey) {
+              setSelectedIDs([n.id])
+              onSelectionRange?.([n.id])
+              onSelect(n.id)
+            }
+          }}
+          onPaneClick={() => clearSelection()}
         >
           <Background gap={16} size={1} />
         </ReactFlow>
+        {selectedIDs.length > 1 && (
+          <div className="canvas-selection-toolbar">
+            <span>已选择 {selectedIDs.length} 个节点</span>
+            <button className="link danger small" onClick={deleteSelected}>删除选中节点</button>
+            <button className="link small" onClick={clearSelection}>清空选择</button>
+          </div>
+        )}
         <button className="ghost canvas-relayout" onClick={relayout} title="放弃手动摆放，恢复自动布局">
           <RotateCcw size={14} aria-hidden="true" />
           自动重排
@@ -404,6 +463,12 @@ function CanvasInner({ tree, selected, onSelect, onTreeChange, onSaved, onDelete
                 ✕
               </button>
             </div>
+            {dotPopover.result.request && (
+              <div className="popover-section">
+                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>HTTP 请求</div>
+                <pre>{safeStringify(dotPopover.result.request)}</pre>
+              </div>
+            )}
             {dotPopover.result.error && (
               <div className="popover-section">
                 <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>错误</div>
