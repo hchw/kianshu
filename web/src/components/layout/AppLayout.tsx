@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, Globe, Moon, Sun, User, Zap } from 'lucide-react'
+import { ChevronDown, Gauge, Globe, Moon, Sun, User, Zap } from 'lucide-react'
 import { currentUser, clearSession, restoreSession } from '../../store/session'
 import { useTheme } from '../../lib/theme'
 
@@ -46,7 +46,7 @@ export default function AppLayout({ title, actions, full, children }: Props) {
     <div className={full ? 'page full' : 'page'}>
       <header className="topbar">
         {/* 品牌区：点击名称回首页 */}
-        <span className="brand" style={{cursor:'pointer'}} onClick={() => nav('/test-sets')}>鉴枢</span>
+        <span className="brand" style={{cursor:'pointer'}} onClick={() => nav('/dashboard')}>鉴枢</span>
 
         {/* 导航下拉 */}
         <div className={`dropdown${navOpen ? ' open' : ''}`} ref={navRef}>
@@ -56,6 +56,10 @@ export default function AppLayout({ title, actions, full, children }: Props) {
             <ChevronDown size={14} className="chevron" />
           </button>
           <div className="dropdown-menu">
+            <button className="dropdown-item" onClick={() => { setNavOpen(false); nav('/dashboard') }}>
+              <Gauge size={14} className="item-icon" />
+              首页
+            </button>
             <button className="dropdown-item" onClick={() => { setNavOpen(false); nav('/test-sets') }}>
               <Zap size={14} className="item-icon" />
               测试集列表

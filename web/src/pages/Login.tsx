@@ -23,7 +23,7 @@ export default function Login() {
       const res = await login(username, password)
       setSession(res.token, { id: res.id, username: res.username })
       toast.success('登录成功')
-      nav('/test-sets')
+      nav('/dashboard')
     } catch (e) {
       const msg = apiError(e)
       setErr(msg)

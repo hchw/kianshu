@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import TestSetList from './pages/TestSetList'
+import Dashboard from './pages/Dashboard'
 import TestSetDetail from './pages/TestSetDetail'
 import FlowEditor from './pages/FlowEditor'
 import Providers from './pages/Providers'
@@ -18,6 +19,14 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route
+          path="/dashboard"
+          element={
+            <RequireAuth>
+              <Dashboard />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/test-sets"
           element={
@@ -50,7 +59,7 @@ function App() {
             </RequireAuth>
           }
         />
-        <Route path="*" element={<Navigate to="/test-sets" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </BrowserRouter>
   )
