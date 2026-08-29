@@ -165,6 +165,37 @@
                 }
             }
         },
+        "/dashboard": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回当前用户有权限访问的测试资产汇总、引导、最近工作和关注事项。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "工作台"
+                ],
+                "summary": "获取工作台",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.DashboardData"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.errorResp"
+                        }
+                    }
+                }
+            }
+        },
         "/flow/flows/{flowID}": {
             "delete": {
                 "security": [
@@ -3912,6 +3943,124 @@
                     "type": "string"
                 },
                 "rounds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.DashboardAttention": {
+            "type": "object",
+            "properties": {
+                "can_edit": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.DashboardData": {
+            "type": "object",
+            "properties": {
+                "attention_items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.DashboardAttention"
+                    }
+                },
+                "onboarding": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.DashboardStep"
+                    }
+                },
+                "recent_work": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.DashboardRecentWork"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/service.DashboardSummary"
+                }
+            }
+        },
+        "service.DashboardRecentWork": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "test_set_id": {
+                    "type": "integer"
+                },
+                "test_set_name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.DashboardStep": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "done": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.DashboardSummary": {
+            "type": "object",
+            "properties": {
+                "enabled_schedules": {
+                    "type": "integer"
+                },
+                "failed_runs": {
+                    "type": "integer"
+                },
+                "flows": {
+                    "type": "integer"
+                },
+                "recent_runs": {
+                    "type": "integer"
+                },
+                "test_sets": {
+                    "type": "integer"
+                },
+                "units": {
                     "type": "integer"
                 }
             }
