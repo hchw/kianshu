@@ -198,6 +198,118 @@ func ListRuns(db *gorm.DB, flowID uint, page, pageSize int) ([]model.ExecutionLo
 }
 
 // GetRun returns one execution log by id.
+type GlobalRunFilter struct {
+	TestSetID uint
+	FlowID    uint
+	Status    string
+	From      *time.Time
+	To        *time.Time
+	Page      int
+	PageSize  int
+}
+
+type GlobalRun struct {
+	model.ExecutionLog
+	TestSetID   uint   `json:"test_set_id"`
+	TestSetName string `json:"test_set_name"`
+	FlowName    string `json:"flow_name"`
+	Role        string `json:"role"`
+}
+
+// ListAccessibleRuns returns execution logs in the user's accessible test sets.
+func ListAccessibleRuns(db *gorm.DB, userID uint, filter GlobalRunFilter) ([]GlobalRun, int64, error) {
+	sets, err := accessibleDashboardSets(db, userID)
+	if err != nil {
+		return nil, 0, err
+	}
+	setIDs := dashboardSetIDs(sets)
+	if filter.TestSetID != 0 {
+		found := false
+		for _, id := range setIDs {
+			if id == filter.TestSetID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return []GlobalRun{}, 0, nil
+		}
+		setIDs = []uint{filter.TestSetID}
+	}
+	q := db.Model(&model.ExecutionLog{}).Joins("JOIN test_flows ON test_flows.id = execution_logs.flow_id").Where("test_flows.test_set_id IN (?)", setIDs)
+	if filter.FlowID != 0 {
+		q = q.Where("execution_logs.flow_id = ?", filter.FlowID)
+	}
+	if filter.Status != "" {
+		status := filter.Status
+		if status == "success" {
+			status = "ok"
+		}
+		q = q.Where("execution_logs.status = ?", status)
+	}
+	if filter.From != nil {
+		q = q.Where("execution_logs.started_at >= ?", *filter.From)
+	}
+	if filter.To != nil {
+		q = q.Where("execution_logs.started_at < ?", *filter.To)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	page, size := filter.Page, filter.PageSize
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 100 {
+		size = 20
+	}
+	var rows []GlobalRun
+	if err := q.Select("execution_logs.*, test_flows.test_set_id, test_flows.name AS flow_name").Order("execution_logs.started_at DESC").Offset((page - 1) * size).Limit(size).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	for i := range rows {
+		var ts model.TestSet
+		if err := db.First(&ts, rows[i].TestSetID).Error; err == nil {
+			rows[i].TestSetName = ts.Name
+		}
+		for _, s := range sets {
+			if s.model.ID == rows[i].TestSetID {
+				rows[i].Role = roleName(s.role)
+				break
+			}
+		}
+	}
+	return rows, total, nil
+}
+
+func GetAccessibleRun(db *gorm.DB, userID, runID uint) (*GlobalRun, error) {
+	sets, err := accessibleDashboardSets(db, userID)
+	if err != nil {
+		return nil, err
+	}
+	ids := dashboardSetIDs(sets)
+	var row GlobalRun
+	query := db.Model(&model.ExecutionLog{}).Joins("JOIN test_flows ON test_flows.id = execution_logs.flow_id").Where("execution_logs.id = ? AND test_flows.test_set_id IN (?)", runID, ids).Select("execution_logs.*, test_flows.test_set_id, test_flows.name AS flow_name")
+	if err := query.First(&row).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrRunNotFound
+		}
+		return nil, err
+	}
+	var ts model.TestSet
+	if err := db.First(&ts, row.TestSetID).Error; err == nil {
+		row.TestSetName = ts.Name
+	}
+	for _, s := range sets {
+		if s.model.ID == row.TestSetID {
+			row.Role = roleName(s.role)
+			break
+		}
+	}
+	return &row, nil
+}
+
 func GetRun(db *gorm.DB, runID uint) (*model.ExecutionLog, error) {
 	var log model.ExecutionLog
 	if err := db.First(&log, runID).Error; err != nil {

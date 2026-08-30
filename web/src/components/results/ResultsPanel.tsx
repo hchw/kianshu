@@ -37,6 +37,15 @@ interface PopoverState {
   loading: boolean
 }
 
+export function RunResultDetail({ run, detail }: { run: Pick<RunLog, 'id' | 'status' | 'node_results'>; detail?: NodeResult[] }) {
+  const nodes = detail ?? parseNodeResults(run.node_results)
+  return <>
+    <div className="run-popover-head"><span className="strong">执行日志 #{run.id}</span></div>
+    {nodes.length > 0 ? <div className="log-box">{nodes.map((n) => <div key={n.node_id} className="run-row"> <span className={`badge ${statusBadge(n.status)}`}>{statusLabel(n.status)}</span> <span className="mono" style={{ fontSize: 11 }}>{n.node_id}</span>{n.error && <span className="err">{n.error}</span>}</div>)}</div> : <div className="muted" style={{ padding: 8 }}>无节点结果</div>}
+    <details style={{ marginTop: 4 }}><summary className="muted" style={{ fontSize: 11, cursor: 'pointer' }}>原始数据</summary><pre className="mono" style={{ fontSize: 10, maxHeight: 180, overflow: 'auto' }}>{JSON.stringify(nodes, null, 2)}</pre></details>
+  </>
+}
+
 export default function ResultsPanel({
   flowID,
   runs,
@@ -223,34 +232,7 @@ export default function ResultsPanel({
               top: Math.max(8, Math.min(popover.y - 200, window.innerHeight - 440)),
             }}
           >
-            <div className="run-popover-head">
-              <span className="strong">执行日志 #{popover.run.id}</span>
-              <button className="link" onClick={() => setPopover(null)}>
-                ✕
-              </button>
-            </div>
-            {popover.loading ? (
-              <div className="muted" style={{ padding: 8 }}>加载中...</div>
-            ) : popover.detail.length > 0 ? (
-              <div className="log-box">
-                {popover.detail.map((n) => (
-                  <div key={n.node_id} className="run-row">
-                    {createBadge(n.status)}
-                    <span className="mono" style={{ fontSize: 11 }}>{n.node_id}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="muted" style={{ padding: 8 }}>无节点结果</div>
-            )}
-            <details style={{ marginTop: 4 }}>
-              <summary className="muted" style={{ fontSize: 11, cursor: 'pointer' }}>
-                原始数据
-              </summary>
-              <pre className="mono" style={{ fontSize: 10, maxHeight: 180, overflow: 'auto' }}>
-                {JSON.stringify(popover.detail, null, 2)}
-              </pre>
-            </details>
+            {popover.loading ? <div className="muted" style={{ padding: 8 }}>加载中...</div> : <><RunResultDetail run={popover.run} detail={popover.detail} /><button className="link" onClick={() => setPopover(null)}>✕ 关闭</button></>}
           </div>,
           document.body,
         )}

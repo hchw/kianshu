@@ -97,6 +97,8 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/auth/logout", s.handleLogout)
 		auth.POST("/auth/refresh", s.handleRefreshToken)
 		auth.GET("/dashboard", s.handleDashboard)
+		auth.GET("/runs", s.handleGlobalRuns)
+		auth.GET("/runs/:runID", s.handleGlobalRun)
 
 		auth.GET("/test-sets", s.handleListTestSets)
 		auth.POST("/test-sets", s.handleCreateTestSet)

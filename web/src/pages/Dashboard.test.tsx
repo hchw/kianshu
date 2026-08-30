@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import Dashboard from './Dashboard'
 
 vi.mock('../api/dashboard', () => ({ getDashboard: vi.fn(async () => ({
-  summary: { test_sets: 0, flows: 0, units: 0, recent_runs: 0, failed_runs: 0, enabled_schedules: 0 },
+  summary: { test_sets: 0, flows: 0, units: 0, recent_runs: 0, successful_runs: 0, failed_runs: 0, enabled_schedules: 0, providers: 0, models: 0 },
   onboarding: [{ key: 'test-set', title: '创建测试集', description: '开始', done: false, target: '/test-sets' }],
   recent_work: [], attention_items: [],
 })) }))

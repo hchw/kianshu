@@ -13,8 +13,11 @@ type DashboardSummary struct {
 	Flows            int `json:"flows"`
 	Units            int `json:"units"`
 	RecentRuns       int `json:"recent_runs"`
+	SuccessfulRuns   int `json:"successful_runs"`
 	FailedRuns       int `json:"failed_runs"`
 	EnabledSchedules int `json:"enabled_schedules"`
+	Providers        int `json:"providers"`
+	Models           int `json:"models"`
 }
 
 type DashboardStep struct {
@@ -72,16 +75,24 @@ func Dashboard(db *gorm.DB, userID uint) (*DashboardData, error) {
 	if err := db.Model(&model.Provider{}).Where("user_id = ? AND enabled = ?", userID, true).Count(&providers).Error; err != nil {
 		return nil, err
 	}
-	var recentRuns, failedRuns int64
+	var models []string
+	if err := db.Model(&model.Provider{}).Where("user_id = ? AND enabled = ? AND model <> ''", userID, true).Distinct("model").Pluck("model", &models).Error; err != nil {
+		return nil, err
+	}
+	result.Summary.Providers, result.Summary.Models = int(providers), len(models)
+	var recentRuns, successfulRuns, failedRuns int64
 	week := time.Now().AddDate(0, 0, -7)
-	flowScope := db.Model(&model.TestFlow{}).Select("id").Where("test_set_id IN ?", dashboardSetIDs(sets))
-	if err := db.Model(&model.ExecutionLog{}).Where("flow_id IN (?) AND created_at >= ?", flowScope, week).Count(&recentRuns).Error; err != nil {
+	flowScope := db.Model(&model.TestFlow{}).Select("id").Where("test_set_id IN (?)", dashboardSetIDs(sets))
+	if err := db.Model(&model.ExecutionLog{}).Where("flow_id IN (?) AND started_at >= ?", flowScope, week).Count(&recentRuns).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Model(&model.ExecutionLog{}).Where("flow_id IN (?) AND created_at >= ? AND status = ?", flowScope, week, "failed").Count(&failedRuns).Error; err != nil {
+	if err := db.Model(&model.ExecutionLog{}).Where("flow_id IN (?) AND started_at >= ? AND status = ?", flowScope, week, "ok").Count(&successfulRuns).Error; err != nil {
 		return nil, err
 	}
-	result.Summary.RecentRuns, result.Summary.FailedRuns = int(recentRuns), int(failedRuns)
+	if err := db.Model(&model.ExecutionLog{}).Where("flow_id IN (?) AND started_at >= ? AND status = ?", flowScope, week, "failed").Count(&failedRuns).Error; err != nil {
+		return nil, err
+	}
+	result.Summary.RecentRuns, result.Summary.SuccessfulRuns, result.Summary.FailedRuns = int(recentRuns), int(successfulRuns), int(failedRuns)
 	var recent []DashboardRecentWork
 	for _, s := range sets {
 		var flows []model.TestFlow
