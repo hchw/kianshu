@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import TestSetDetail from './pages/TestSetDetail'
 import FlowEditor from './pages/FlowEditor'
 import Providers from './pages/Providers'
+import Runs from './pages/Runs'
 import { isAuthed } from './store/session'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -48,6 +49,14 @@ function App() {
           element={
             <RequireAuth>
               <FlowEditor />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/runs"
+          element={
+            <RequireAuth>
+              <Runs />
             </RequireAuth>
           }
         />

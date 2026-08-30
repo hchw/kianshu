@@ -1503,6 +1503,25 @@ h3 {
    执行日志弹窗与分页
    ============================================================ */
 
+.runs-page {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.runs-table {
+  table-layout: fixed;
+  min-width: 900px;
+}
+
+.runs-table th:nth-child(1) { width: 18%; }
+.runs-table th:nth-child(2) { width: 20%; }
+.runs-table th:nth-child(3) { width: 15%; }
+.runs-table th:nth-child(4) { width: 10%; }
+.runs-table th:nth-child(5) { width: 22%; }
+.runs-table th:nth-child(6) { width: 15%; }
+.runs-table td:last-child { white-space: nowrap; }
+
 .run-popover {
   position: fixed;
   z-index: 50;
@@ -1753,7 +1772,9 @@ h3 {
 .dashboard-head { display:flex; justify-content:space-between; align-items:center; margin: var(--space-5) 0; }
 .dashboard-head h1 { margin:0 0 var(--space-1); }
 .dashboard-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:var(--space-3); margin-bottom:var(--space-4); }
-.dashboard-stat { display:flex; align-items:center; gap:var(--space-3); padding:var(--space-4); }
+.dashboard-stat { display:flex; align-items:center; gap:var(--space-3); padding:var(--space-4); text-align:left; width:100%; }
+.dashboard-stat-disabled { opacity:.65; cursor:default; }
+.dashboard-stat-disabled > svg { color:var(--muted); }
 .dashboard-stat > svg { color:var(--primary); }
 .dashboard-stat strong { display:block; font-size:var(--fs-24); }
 .dashboard-stat span { display:block; margin-top:var(--space-1); }

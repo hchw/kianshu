@@ -4061,7 +4061,16 @@ const docTemplate = `{
                 "flows": {
                     "type": "integer"
                 },
+                "models": {
+                    "type": "integer"
+                },
+                "providers": {
+                    "type": "integer"
+                },
                 "recent_runs": {
+                    "type": "integer"
+                },
+                "successful_runs": {
                     "type": "integer"
                 },
                 "test_sets": {

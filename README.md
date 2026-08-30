@@ -22,23 +22,38 @@
 
 鉴枢面向需要验证多个接口协作关系的团队，把 OpenAPI/Swagger 文档、自然语言意图和可视化测试流程连接起来，帮助团队更快建立稳定、可追踪的集成测试。
 
-## 怎么用
+## 快速开始（使用 Release 包）
 
-### 1. 启动服务并注册账号
+普通用户无需安装 Go、Node.js 或前端依赖，直接下载对应平台的 Release 包即可使用。
 
-```bash
-# 一键启动后端和前端
-make dev
-```
+### 两行命令快速运行
 
-然后访问 <http://localhost:5173>，注册并登录。默认使用 SQLite，数据库文件为项目根目录下的 `kianshu.db`。
+下载、解压和启动只需要两步。以下示例下载最新 Release；首次使用请将示例密钥替换为自己的固定 32 字节密钥。
 
-也可以分别启动：
+Linux/macOS：
 
 ```bash
-make dev-backend   # 后端：http://localhost:8080
-make dev-frontend  # 前端：http://localhost:5173
+curl -L https://github.com/hchw/kianshu/releases/latest/download/kianshu-linux-amd64.tar.gz | tar -xz && cd kianshu-linux-amd64
+KS_ENC_KEY='请替换为安全且固定的32字节密钥' ./kianshu
 ```
+
+Windows PowerShell：
+
+```powershell
+Invoke-WebRequest https://github.com/hchw/kianshu/releases/latest/download/kianshu-windows-amd64.zip -OutFile kianshu.zip; Expand-Archive kianshu.zip -DestinationPath ./ -Force
+Set-Location .\kianshu-windows-amd64; $env:KS_ENC_KEY = "请替换为安全且固定的32字节密钥"; .\kianshu.exe
+```
+
+启动后访问 <http://localhost:8080>。默认使用 SQLite，数据库文件会创建在程序同目录下的 `kianshu.db`。
+
+### 1. 下载 Release 包
+
+前往 [GitHub Releases](https://github.com/hchw/kianshu/releases) 下载最新版本：
+
+- `kianshu-linux-amd64.tar.gz`：Linux amd64
+- `kianshu-windows-amd64.zip`：Windows amd64
+
+解压后进入包目录，按照上方“一行命令启动”的说明运行。Release 包已包含构建好的 `web-dist/`，不需要安装 Node.js；默认使用 SQLite，数据库文件会创建在程序同目录下的 `kianshu.db`。
 
 ### 2. 创建测试集并导入接口文档
 
@@ -48,7 +63,7 @@ make dev-frontend  # 前端：http://localhost:5173
 
 在“模型 Provider”中填写兼容 OpenAI API 的服务地址、模型和 API Key，并先测试连通性。API Key 会被加密保存，不需要写入测试流程。
 
-### 4. 让 Agent 生成测试流
+### 4. 描述目标并生成测试流
 
 在流编辑器中描述测试目标，例如“先登录，提取 token，再创建订单并校验订单状态”。Agent 会根据已导入的接口生成树形测试流，并自动补充接口之间的数据适配、断言和必要的异常处理。
 
@@ -80,9 +95,12 @@ make dev-frontend  # 前端：http://localhost:5173
 - 需要列表循环、数据关联或异常分支的复杂接口测试
 - 团队共享的接口质量检查和定时巡检
 
-## 开发与检查
+## 开发与检查（开发者）
+
+开发者需要本地联调时才使用 `make dev`；普通用户请使用上方的 Release 包。
 
 ```bash
+make dev       # 本地一键启动后端和前端
 make test      # 运行后端和前端测试
 make lint      # Go vet 和前端 lint
 make build     # 构建后端与前端
@@ -127,64 +145,6 @@ $env:DB_PATH = "D:\\data\\kianshu.db"
 ```
 
 使用 MySQL 或 Postgres 时，请设置 `DB_DRIVER` 和对应的 `DB_DSN`，并确保数据库已创建且服务进程可以访问。
-
-## Release 发布与打包
-
-项目使用 GitHub Actions 自动构建 Release。向仓库推送符合 `v*` 格式的 Git tag（例如 `v1.0.0`）后，会自动执行前端构建、后端测试和跨平台编译，并创建 GitHub Release。
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-当前会生成以下发布包：
-
-- `kianshu-linux-amd64.tar.gz`：Linux amd64
-- `kianshu-windows-amd64.zip`：Windows amd64
-
-每个发布包包含：
-
-- `kianshu` 或 `kianshu.exe`：后端可执行文件
-- `web-dist/`：已构建的前端静态文件
-- `README.md`：使用说明
-
-下载对应平台的压缩包并解压后，在包目录中设置必要的环境变量，然后启动程序即可。发布包会优先读取同目录的 `web-dist/`，因此不需要安装 Node.js；SQLite 模式下数据库默认创建为同目录的 `kianshu.db`。
-
-```bash
-# Linux 示例；生产环境请替换为随机的 32 字节密钥
-export KS_ENC_KEY='0123456789abcdef0123456789abcdef'
-./kianshu
-```
-
-### Windows PowerShell
-
-下载 `kianshu-windows-amd64.zip` 后解压，在 PowerShell 中进入解压目录。首次运行前设置一个固定的 32 字节 `KS_ENC_KEY`，然后启动程序：
-
-```powershell
-Set-Location .\kianshu-windows-amd64
-$env:KS_ENC_KEY = "0123456789abcdef0123456789abcdef"
-.\kianshu.exe
-```
-
-PowerShell 中通过 `$env:` 设置的环境变量只对当前窗口及其启动的进程有效。如果希望永久保存配置，可以使用：
-
-```powershell
-[Environment]::SetEnvironmentVariable(
-  "KS_ENC_KEY",
-  "0123456789abcdef0123456789abcdef",
-  "User"
-)
-```
-
-设置永久环境变量后，请重新打开 PowerShell，再执行：
-
-```powershell
-.\kianshu.exe
-```
-
-默认启动地址为 <http://localhost:8080>。如果 Windows Defender SmartScreen 拦截未签名程序，请在确认文件来源可信后选择“更多信息”→“仍要运行”。
-
-`KS_ENC_KEY` 用于加密保存 Provider API Key，生产环境必须使用安全且固定的密钥。更多数据库、监听地址和超时配置请参考 `internal/config/config.go`。
 
 ## 开源协议
 
