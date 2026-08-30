@@ -132,6 +132,44 @@ type updateTestSetReq struct {
 //	@Failure	403		{object}	errorResp			"无编辑权限"
 //	@Failure	404		{object}	errorResp			"测试集不存在"
 //	@Router		/test-sets/{id} [patch]
+//
+// handleDeleteTestSet deletes an empty test set owned by or editable by the caller.
+func (s *Server) handleDeleteTestSet(c *gin.Context) {
+	uid, _ := userIDOf(c)
+	id, ok := parseID(c, "id")
+	if !ok {
+		writeErr(c, http.StatusBadRequest, "无效的测试集 ID")
+		return
+	}
+	canEdit, err := service.CanEdit(s.DB, id, uid)
+	if err != nil {
+		writeErr(c, http.StatusInternalServerError, "权限检查失败")
+		return
+	}
+	if !canEdit {
+		writeErr(c, http.StatusForbidden, "无编辑权限")
+		return
+	}
+	var flowCount int64
+	if err := s.DB.Model(&model.TestFlow{}).Where("test_set_id = ?", id).Count(&flowCount).Error; err != nil {
+		writeErr(c, http.StatusInternalServerError, "检查测试流失败")
+		return
+	}
+	if flowCount > 0 {
+		writeErr(c, http.StatusConflict, "测试集包含测试流,不能删除")
+		return
+	}
+	if err := s.DB.Where("test_set_id = ?", id).Delete(&model.TestSetMember{}).Error; err != nil {
+		writeErr(c, http.StatusInternalServerError, "删除失败")
+		return
+	}
+	if err := s.DB.Delete(&model.TestSet{}, id).Error; err != nil {
+		writeErr(c, http.StatusInternalServerError, "删除失败")
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (s *Server) handleUpdateTestSet(c *gin.Context) {
 	uid, _ := userIDOf(c)
 	id, ok := parseID(c, "id")
