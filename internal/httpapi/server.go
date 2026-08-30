@@ -104,6 +104,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/test-sets", s.handleCreateTestSet)
 		auth.GET("/test-sets/:id", s.handleGetTestSet)
 		auth.PATCH("/test-sets/:id", s.handleUpdateTestSet)
+		auth.DELETE("/test-sets/:id", s.handleDeleteTestSet)
 		auth.GET("/test-sets/:id/members", s.handleListMembers)
 		auth.POST("/test-sets/:id/members", s.handleAddMember)
 		auth.DELETE("/test-sets/:id/members/:userID", s.handleRemoveMember)

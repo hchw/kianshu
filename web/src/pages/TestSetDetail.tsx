@@ -59,7 +59,7 @@ export default function TestSetDetail() {
 
   const saveHost = async () => {
     try {
-      await updateTestSet(testSetID, host)
+      await updateTestSet(testSetID, { host })
       toast.success('Host 已保存')
       await load()
     } catch (e) {
@@ -191,39 +191,49 @@ export default function TestSetDetail() {
                 />
               ) : (
                 flows.map((f) => (
-                  <div key={f.id} className="card item" onClick={() => nav(`/flows/${f.id}`)}>
-                    {editingID === f.id ? (
-                      <input
-                        autoFocus
-                        className="mono"
-                        value={editingName}
-                        placeholder="流名称"
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => {
-                          e.stopPropagation()
-                          if (e.key === 'Enter') void commitRename()
-                          else if (e.key === 'Escape') setEditingID(null)
-                        }}
-                        onBlur={() => setEditingID(null)}
-                      />
-                    ) : (
-                      <span className="strong">{f.name}</span>
-                    )}
-                    {editingID !== f.id && (
-                      <button
-                        className="link"
-                        title="重命名"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          startRename(f)
-                        }}
-                      >
-                        <Pencil size={14} aria-hidden="true" />
-                      </button>
-                    )}
-                    <span className="muted">打开编辑器 →</span>
-                    <PopConfirm
+                  <div
+                    key={f.id}
+                    className="card item"
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest('button, input, .popconfirm-anchor')) return
+                      nav(`/flows/${f.id}`)
+                    }}
+                  >
+                    <div className="flow-item-name">
+                      {editingID === f.id ? (
+                        <input
+                          autoFocus
+                          className="mono"
+                          value={editingName}
+                          placeholder="流名称"
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation()
+                            if (e.key === 'Enter') void commitRename()
+                            else if (e.key === 'Escape') setEditingID(null)
+                          }}
+                          onBlur={() => setEditingID(null)}
+                        />
+                      ) : (
+                        <span className="strong">{f.name}</span>
+                      )}
+                      {editingID !== f.id && (
+                        <button
+                          className="link"
+                          title="重命名"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            startRename(f)
+                          }}
+                        >
+                          <Pencil size={14} aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                    <span className="muted flow-item-open">打开编辑器 →</span>
+                    <div className="flow-item-actions">
+                      <PopConfirm
                       title="复制测试流"
                       message={`将「${f.name}」的当前草稿复制为新流`}
                       input={{ defaultValue: `${f.name} 副本`, placeholder: '新流名称' }}
@@ -239,6 +249,7 @@ export default function TestSetDetail() {
                     >
                       <button className="link danger">删除</button>
                     </PopConfirm>
+                    </div>
                   </div>
                 ))
               )}

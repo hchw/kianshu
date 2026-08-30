@@ -40,13 +40,17 @@ export async function createTestSet(name: string) {
   return data
 }
 
+export async function deleteTestSet(id: number) {
+  await api.delete(`/test-sets/${id}`)
+}
+
 export async function getTestSet(id: number) {
   const { data } = await api.get<TestSet>(`/test-sets/${id}`)
   return data
 }
 
-export async function updateTestSet(id: number, host: string) {
-  const { data } = await api.patch<TestSet>(`/test-sets/${id}`, { host })
+export async function updateTestSet(id: number, updates: { name?: string; host?: string }) {
+  const { data } = await api.patch<TestSet>(`/test-sets/${id}`, updates)
   return data
 }
 

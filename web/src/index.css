@@ -449,6 +449,37 @@ h3 {
   border-color: var(--primary);
 }
 
+.flow-item-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.flow-item-name .strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-item-name input {
+  min-width: 0;
+  width: 100%;
+}
+
+.flow-item-open {
+  flex: 0 0 124px;
+  text-align: left;
+}
+
+.flow-item-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .list {
   margin-top: var(--space-2);
 }
