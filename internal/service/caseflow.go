@@ -197,11 +197,25 @@ func DeleteCaseFlow(db *gorm.DB, caseFlowID uint) error {
 			}
 			return err
 		}
+		var nodes []model.CaseNode
+		if err := tx.Where("case_flow_id = ?", caseFlowID).Find(&nodes).Error; err != nil {
+			return err
+		}
+		nodeIDs := make([]uint, 0, len(nodes))
+		for _, n := range nodes {
+			nodeIDs = append(nodeIDs, n.ID)
+		}
 		for _, m := range []any{
 			&model.CaseFlowDraft{}, &model.CaseFlowVersion{}, &model.CaseSource{},
-			&model.CaseNode{}, &model.CaseCoverage{}, &model.CaseFlowSession{},
+			&model.CaseNode{}, &model.CaseFlowSession{},
 		} {
 			if err := tx.Where("case_flow_id = ?", caseFlowID).Delete(m).Error; err != nil {
+				return err
+			}
+		}
+		// CaseCoverage 通过 case_node_id 间接关联到用例流，需按节点 ID 删除。
+		if len(nodeIDs) > 0 {
+			if err := tx.Where("case_node_id IN ?", nodeIDs).Delete(&model.CaseCoverage{}).Error; err != nil {
 				return err
 			}
 		}
