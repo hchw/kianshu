@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
+	"github/hchw/kianshu/internal/agent"
 	"github/hchw/kianshu/internal/model"
 	"github/hchw/kianshu/internal/openai"
 
@@ -20,25 +20,12 @@ var ErrSessionBusy = errors.New("该流已有正在进行的提交,请稍后再�
 // ErrFlowNotFound re-exported alias for callers that only import service.
 
 // sessionLocks guards concurrent agent submissions per flow.
-var sessionLocks = struct {
-	sync.Mutex
-	held map[uint]*sync.Mutex
-}{held: map[uint]*sync.Mutex{}}
+var sessionLocks = agent.NewKeyedLock()
 
 // LockFlow serializes agent submissions for one flow. It returns an unlock
 // function, or nil when another submission is already in progress.
 func LockFlow(flowID uint) func() {
-	sessionLocks.Lock()
-	m, ok := sessionLocks.held[flowID]
-	if !ok {
-		m = &sync.Mutex{}
-		sessionLocks.held[flowID] = m
-	}
-	sessionLocks.Unlock()
-	if !m.TryLock() {
-		return nil
-	}
-	return m.Unlock
+	return sessionLocks.TryLock(flowID)
 }
 
 // GetFlowSession returns the dialog session of a flow, creating one if absent.
@@ -94,45 +81,7 @@ func unmarshalSessionMessages(s *model.FlowSession) ([]openai.Message, error) {
 // messages that lack matching tool responses. This can happen when a scope-
 // violation pause saved the session mid-round (before this was fixed).
 func fixMessageHistory(msgs []openai.Message) []openai.Message {
-	if len(msgs) == 0 {
-		return msgs
-	}
-	// 找到最后一条 assistant(tool_calls) 消息，检查其后的 tool 消息是否完整
-	lastAssistantIdx := -1
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "assistant" && len(msgs[i].ToolCalls) > 0 {
-			lastAssistantIdx = i
-			break
-		}
-	}
-	if lastAssistantIdx < 0 {
-		return msgs
-	}
-	// 收集 assistant 中的 tool_call_id 集合
-	expected := map[string]bool{}
-	for _, tc := range msgs[lastAssistantIdx].ToolCalls {
-		expected[tc.ID] = true
-	}
-	// 从 assistant 之后收集 tool 消息的 tool_call_id
-	seen := map[string]bool{}
-	for i := lastAssistantIdx + 1; i < len(msgs); i++ {
-		if msgs[i].Role == "tool" {
-			seen[msgs[i].ToolCallID] = true
-		}
-	}
-	// 检查是否每个 tool_call_id 都有对应的 tool 消息
-	complete := true
-	for id := range expected {
-		if !seen[id] {
-			complete = false
-			break
-		}
-	}
-	if complete {
-		return msgs
-	}
-	// 截断到最后一条完整的 assistant 消息之前
-	return msgs[:lastAssistantIdx]
+	return agent.FixMessageHistory(msgs)
 }
 
 // CompressSession compacts a flow's dialog history by keeping the system
@@ -151,33 +100,12 @@ func CompressSession(db *gorm.DB, flowID uint) (*model.FlowSession, error) {
 		return s, nil // nothing to compress
 	}
 
-	// Collect tool operation summaries from the history.
-	var ops []string
-	for _, m := range msgs {
-		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
-			for _, tc := range m.ToolCalls {
-				ops = append(ops, tc.Function.Name)
-			}
-		}
-	}
-
-	// Rebuild: keep system, a compact summary, and the last user message.
-	compressed := []openai.Message{}
-	if len(msgs) > 0 && msgs[0].Role == "system" {
-		compressed = append(compressed, msgs[0])
-	}
-	if len(ops) > 0 {
-		summary := fmt.Sprintf("之前对话中执行了 %d 次工具调用（%s）。当前流草稿即这些操作的结果。请据此继续。",
+	// Keep the existing flow-specific summary wording while delegating the
+	// message selection and compaction mechanics to the shared runtime.
+	compressed := agent.CompactMessages(msgs, func(ops []string) string {
+		return fmt.Sprintf("之前对话中执行了 %d 次工具调用（%s）。当前流草稿即这些操作的结果。请据此继续。",
 			len(ops), strings.Join(dedupeSlice(ops), ", "))
-		compressed = append(compressed, openai.Message{Role: "assistant", Content: &summary})
-	}
-	// 保留最后一条用户消息以维持上下文
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" {
-			compressed = append(compressed, msgs[i])
-			break
-		}
-	}
+	})
 
 	b, err := json.Marshal(compressed)
 	if err != nil {

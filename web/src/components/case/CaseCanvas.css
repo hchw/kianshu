@@ -1,0 +1,92 @@
+/* Case Flow 编辑器主区：占满 editor-grid 第一列，显式高度链，防止 ReactFlow 容器为 0 */
+.case-editor-main {
+  display: flex;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.case-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.case-canvas > .react-flow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.case-flow-node {
+  min-width: 150px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.case-flow-node.covered { border-color: var(--ok); }
+
+.case-flow-node-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning, #eab308);
+}
+
+.case-flow-node.covered .case-flow-node-status { background: var(--ok); }
+
+.case-flow-node-id { color: var(--muted); font: 11px monospace; }
+
+.case-flow-node-desc {
+  font-size: 12px;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.case-flow-node-selected .case-flow-node {
+  box-shadow: 0 0 0 2px var(--primary), 0 0 14px 4px rgba(59, 130, 246, 0.35);
+}
+
+.case-canvas-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  z-index: 3;
+  padding: 4px 8px;
+  color: var(--muted);
+  background: var(--surface);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* 画布内右侧节点面板：与 NodePanel 同位，但随主区排布而不是悬浮 */
+.case-editor-node-panel {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 320px;
+  max-width: 320px;
+  max-height: none;
+  height: 100%;
+  overflow-y: auto;
+  flex: 0 0 320px;
+}

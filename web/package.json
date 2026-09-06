@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-tabs": "^1.1.21",
     "@xyflow/react": "^12.11.2",
     "axios": "^1.19.0",
     "lucide-react": "^1.30.0",

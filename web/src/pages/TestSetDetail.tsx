@@ -13,6 +13,7 @@ import { deleteFlow, duplicateFlow, renameFlow } from '../api/flow'
 import ImportPanel from '../components/testset/ImportPanel'
 import UnitsBrowser from '../components/testset/UnitsBrowser'
 import MembersPanel from '../components/testset/MembersPanel'
+import CaseFlowPanel from '../components/case/CaseFlowPanel'
 import AppLayout from '../components/layout/AppLayout'
 import { PageSpinner } from '../components/feedback/PageSpinner'
 import { SkeletonList } from '../components/feedback/Skeleton'
@@ -22,7 +23,7 @@ import PopConfirm from '../components/dialog/PopConfirm'
 import { useToast } from '../components/feedback/Toast'
 import { GitBranch, Pencil } from 'lucide-react'
 
-type Tab = 'overview' | 'import' | 'units' | 'members'
+type Tab = 'overview' | 'import' | 'units' | 'members' | 'case'
 
 export default function TestSetDetail() {
   const { id } = useParams()
@@ -154,6 +155,9 @@ export default function TestSetDetail() {
         <button className={tab === 'members' ? 'tab on' : 'tab'} onClick={() => setTab('members')}>
           成员
         </button>
+        <button className={tab === 'case' ? 'tab on' : 'tab'} onClick={() => setTab('case')}>
+          用例
+        </button>
       </nav>
 
       {tab === 'overview' && (
@@ -261,6 +265,7 @@ export default function TestSetDetail() {
       {tab === 'import' && <ImportPanel testSetID={testSetID} onImported={load} />}
       {tab === 'units' && <UnitsBrowser testSetID={testSetID} />}
       {tab === 'members' && <MembersPanel testSetID={testSetID} ownerID={set.owner_id} />}
+      {tab === 'case' && <CaseFlowPanel testSetID={testSetID} />}
     </AppLayout>
   )
 }

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
+	"github/hchw/kianshu/internal/agent"
 	"github/hchw/kianshu/internal/flow"
 	"github/hchw/kianshu/internal/model"
 	"github/hchw/kianshu/internal/openai"
@@ -22,6 +22,10 @@ type ChatProvider interface {
 	ChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest) (*openai.CompletionResponse, error)
 }
 
+// StreamingProvider 保留旧服务层类型名，兼容生成流程现有的类型断言；
+// 实现委托给通用 Agent Runtime 的 StreamingChatClient。
+type StreamingProvider = agent.StreamingChatClient
+
 // MaxRounds is the per-submission tool-call round limit.
 const MaxRounds = 50
 
@@ -33,31 +37,17 @@ const (
 	ModeGenerate Mode = "generate"
 )
 
-// Event kinds pushed over SSE in real time.
-const (
-	// EventKindRound announces that a new LLM round is starting.
-	EventKindRound = "round"
-	// EventKindText carries one incremental chunk of the assistant's reply.
-	EventKindText = "text"
-	// EventKindReasoning carries one incremental chunk of the model's
-	// thinking/reasoning content (display-only, not fed back to the model).
-	EventKindReasoning = "reasoning"
-	// EventKindTool carries one tool invocation and its result (default kind).
-	EventKindTool = "tool"
-	// EventKindCheckpoint announces an internal validation checkpoint.
-	EventKindCheckpoint = "checkpoint"
-)
+// Event and event kinds remain service aliases for compatibility with the
+// existing Execution Flow HTTP/SSE handlers and tests.
+type Event = agent.Event
 
-// Event is one round of LLM activity pushed in real time over SSE.
-type Event struct {
-	Kind   string `json:"kind,omitempty"` // "round" | "text" | "tool"(默认)
-	Round  int    `json:"round"`
-	Tool   string `json:"tool,omitempty"`
-	Args   any    `json:"args,omitempty"`
-	Result any    `json:"result,omitempty"`
-	// Text is the incremental assistant content for kind=text events.
-	Text string `json:"text,omitempty"`
-}
+const (
+	EventKindRound      = agent.EventKindRound
+	EventKindText       = agent.EventKindText
+	EventKindReasoning  = agent.EventKindReasoning
+	EventKindTool       = agent.EventKindTool
+	EventKindCheckpoint = agent.EventKindCheckpoint
+)
 
 // AgentHooks carries the real-time progress callbacks of an agent run
 // (the SSE emit channel).
@@ -138,27 +128,16 @@ func validationDelta(previous, current flow.Result) flow.Result {
 	return out
 }
 
-// StreamingProvider is the optional streaming capability of a ChatProvider.
-// Real *openai.Client wrappers implement it; test fakes fall back to the
-// non-streaming path.
-type StreamingProvider interface {
-	ChatProvider
-	StreamChatCompletion(ctx context.Context, p openai.Provider, req openai.CompletionRequest, onChunk openai.StreamCallback, onReasoning openai.ReasoningCallback) (*openai.CompletionResponse, error)
-}
-
 // ThinkingUnset 是不设置 thinking 配置的哨兵值：选中后请求体省略 thinking
 // 字段，交由 provider 自身默认行为决定是否深度思考。区别于 "disabled"
 // （显式要求关闭）。
-const ThinkingUnset = "unset"
+const ThinkingUnset = agent.ThinkingUnset
 
 // thinkingMode normalizes a user-supplied reasoning mode. Empty string and
 // "disabled" both turn chain-of-thought off; any other value is passed through
 // (low/high/max or a provider-specific custom token).
 func thinkingMode(t string) string {
-	if strings.TrimSpace(t) == "" {
-		return "disabled"
-	}
-	return t
+	return agent.ThinkingMode(t)
 }
 
 // newAgentCompletionRequest builds a chat request for agent rounds with the
@@ -167,17 +146,7 @@ func thinkingMode(t string) string {
 // thinking 字段(交由 provider 默认)。provider 的 strict-content 设置
 // (ollama/vLLM) 通过 ForceContentString 生效。
 func newAgentCompletionRequest(provider openai.Provider, messages []openai.Message, thinking string) openai.CompletionRequest {
-	req := openai.CompletionRequest{
-		Model:    provider.GetModel(),
-		Messages: messages,
-	}
-	if t := thinkingMode(thinking); t != ThinkingUnset {
-		req.Thinking = &openai.ThinkingConfig{Type: t}
-	}
-	if provider.GetStrictContent() {
-		req.ForceContentString = true
-	}
-	return req
+	return agent.CompletionRequest(provider, messages, thinking)
 }
 
 // flowSystemPrompt builds the system message for one agent submission by
@@ -522,30 +491,16 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 			opt.Emit(Event{Kind: EventKindRound, Round: round})
 		}
 
-		// 3 次重试应对瞬态失败(网络抖动/限流)
-		var resp *openai.CompletionResponse
-		var lastErr error
-		for retry := 0; retry < 3; retry++ {
-			resp, lastErr = opt.complete(ctx, opt.Provider, req, func(text string) {
-				if opt.Emit != nil {
-					opt.Emit(Event{Kind: EventKindText, Round: round, Text: text})
-				}
-			}, func(text string) {
-				if opt.Emit != nil {
-					opt.Emit(Event{Kind: EventKindReasoning, Round: round, Text: text})
-				}
-			})
-			if lastErr == nil {
-				break
+		// 3 次重试应对瞬态失败(网络抖动/限流)，由通用 Runtime 负责。
+		resp, lastErr := agent.CompleteWithRetry(ctx, opt.Provider, opt.Provider, req, func(text string) {
+			if opt.Emit != nil {
+				opt.Emit(Event{Kind: EventKindText, Round: round, Text: text})
 			}
-			if ctx.Err() != nil {
-				break
+		}, func(text string) {
+			if opt.Emit != nil {
+				opt.Emit(Event{Kind: EventKindReasoning, Round: round, Text: text})
 			}
-			if retry < 2 {
-				log.Warnf("agent: flow=%d round=%d LLM 调用失败(第%d次重试): %v", flowID, round, retry+1, lastErr)
-				time.Sleep(time.Duration(retry+1) * 2 * time.Second)
-			}
-		}
+		}, 3)
 		if lastErr != nil {
 			log.Errorf("agent: flow=%d round=%d LLM 调用失败(已重试3次): %v", flowID, round, lastErr)
 			req.Messages = append(req.Messages, openai.Message{
@@ -726,10 +681,7 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 // assistant's reply reaches the client token by token via onText. 若提供
 // onReasoning,思考过程增量(reasoning_content)会实时回调。
 func (opt AgentOptions) complete(ctx context.Context, p ChatProvider, req openai.CompletionRequest, onText func(string), onReasoning openai.ReasoningCallback) (*openai.CompletionResponse, error) {
-	if sp, ok := p.(StreamingProvider); ok {
-		return sp.StreamChatCompletion(ctx, p, req, onText, onReasoning)
-	}
-	return p.ChatCompletion(ctx, p, req)
+	return agent.Complete(ctx, p, p, req, onText, onReasoning)
 }
 
 func strPtr(s string) *string { return &s }

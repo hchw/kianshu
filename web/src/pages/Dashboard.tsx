@@ -20,7 +20,7 @@ export default function Dashboard() {
     {loading ? <SkeletonList count={4} /> : data && <>
       <div className="dashboard-stats">
         <button className="card dashboard-stat" onClick={() => nav('/test-sets')}><FolderOpen size={20} /><div><strong>测试资产</strong><span className="muted">测试集 {data.summary.test_sets} · 测试流 {data.summary.flows}</span></div></button>
-        <div className="card dashboard-stat dashboard-stat-disabled"><FlaskConical size={20} /><div><strong>接口用例</strong><span className="muted">用例数：即将上线</span><span className="muted">接口数：{data.summary.units}</span></div></div>
+        <button className="card dashboard-stat" onClick={() => nav('/cases')}><FlaskConical size={20} /><div><strong>接口用例</strong><span className="muted">用例流与执行流总览</span><span className="muted">接口数：{data.summary.units}</span></div></button>
         <button className="card dashboard-stat" onClick={() => nav('/providers')}><Bot size={20} /><div><strong>Provider / 模型</strong><span className="muted">Provider {data.summary.providers} · 模型 {data.summary.models}</span></div></button>
         <button className="card dashboard-stat" onClick={() => nav('/runs')}><Gauge size={20} /><div><strong>执行情况</strong><span className="muted">近 7 天：{data.summary.recent_runs} 次</span><span className="muted">成功 {data.summary.successful_runs} · 失败 {data.summary.failed_runs}</span></div></button>
       </div>
