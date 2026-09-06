@@ -4086,7 +4086,6 @@ const docTemplate = `{
             "properties": {
                 "args": {},
                 "kind": {
-                    "description": "\"round\" | \"text\" | \"tool\"(默认)",
                     "type": "string"
                 },
                 "result": {},
@@ -4094,7 +4093,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "text": {
-                    "description": "Text is the incremental assistant content for kind=text events.",
                     "type": "string"
                 },
                 "tool": {

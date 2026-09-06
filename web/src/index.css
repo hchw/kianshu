@@ -1821,3 +1821,12 @@ h3 {
 .empty-dashboard { display:flex; align-items:center; gap:var(--space-2); color:var(--muted); }
 .ok { color:var(--ok); display:flex; align-items:center; gap:var(--space-2); }
 @media (max-width: 720px) { .dashboard-stats { grid-template-columns:repeat(2,1fr); } .dashboard-columns { grid-template-columns:1fr; } .dashboard-work { align-items:flex-start; flex-direction:column; gap:var(--space-2); } }
+
+/* Radix Tabs：用例总览等页面的页签，样式对齐既有 .tab */
+.tabs-list { display: flex; gap: var(--space-1); border-bottom: 1px solid var(--border); }
+.tabs-trigger { position: relative; border: none; background: none; border-radius: var(--radius-6) var(--radius-6) 0 0; padding: 8px 16px; color: var(--muted); cursor: pointer; font-size: var(--fs-13); }
+.tabs-trigger:hover { color: var(--text); background: var(--hover); }
+.tabs-trigger[data-state='active'] { color: var(--primary); }
+.tabs-trigger::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: transparent; }
+.tabs-trigger[data-state='active']::after { background: var(--primary); }
+.tabs-content { outline: none; }

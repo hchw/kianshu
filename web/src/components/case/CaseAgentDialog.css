@@ -1,0 +1,8 @@
+.case-agent-dialog { display: flex; flex-direction: column; gap: var(--space-2); }
+.case-agent-history { max-height: 360px; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-6); }
+.agent-message { padding: 8px; border-radius: var(--radius-6); white-space: pre-wrap; }
+.agent-message.user { background: var(--surface); }
+.agent-message.assistant { background: color-mix(in srgb, var(--primary) 10%, var(--surface)); }
+.agent-message strong { display: block; margin-bottom: 4px; }
+.agent-event { color: var(--muted); font-size: 12px; padding: 4px 0; border-top: 1px solid var(--border); }
+.case-agent-history pre { white-space: pre-wrap; margin: 4px 0; font-size: 12px; }

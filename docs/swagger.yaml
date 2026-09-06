@@ -786,13 +786,11 @@ definitions:
     properties:
       args: {}
       kind:
-        description: '"round" | "text" | "tool"(默认)'
         type: string
       result: {}
       round:
         type: integer
       text:
-        description: Text is the incremental assistant content for kind=text events.
         type: string
       tool:
         type: string

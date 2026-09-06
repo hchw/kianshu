@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github/hchw/kianshu/internal/agent"
 	"github/hchw/kianshu/internal/flow"
 	"github/hchw/kianshu/internal/model"
 	"github/hchw/kianshu/internal/openai"
@@ -196,10 +197,7 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 // streaming when available so the model's feedback reaches the client in real
 // time.
 func generateComplete(ctx context.Context, p ChatProvider, req openai.CompletionRequest, onText func(string), onReasoning openai.ReasoningCallback) (*openai.CompletionResponse, error) {
-	if sp, ok := p.(StreamingProvider); ok {
-		return sp.StreamChatCompletion(ctx, p, req, onText, onReasoning)
-	}
-	return p.ChatCompletion(ctx, p, req)
+	return agent.CompleteWithRetry(ctx, p, p, req, onText, onReasoning, 3)
 }
 
 // ResumeGeneration continues a paused generation with the user's answers. Each

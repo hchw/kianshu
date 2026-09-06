@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, Gauge, Globe, Moon, Sun, User, Zap } from 'lucide-react'
+import { ChevronDown, FlaskConical, Gauge, Globe, Moon, Sun, User, Zap } from 'lucide-react'
 import { currentUser, clearSession, restoreSession } from '../../store/session'
 import { useTheme } from '../../lib/theme'
 
@@ -63,6 +63,10 @@ export default function AppLayout({ title, actions, full, children }: Props) {
             <button className="dropdown-item" onClick={() => { setNavOpen(false); nav('/test-sets') }}>
               <Zap size={14} className="item-icon" />
               测试集列表
+            </button>
+            <button className="dropdown-item" onClick={() => { setNavOpen(false); nav('/cases') }}>
+              <FlaskConical size={14} className="item-icon" />
+              用例总览
             </button>
             <button className="dropdown-item" onClick={() => { setNavOpen(false); nav('/providers') }}>
               <Globe size={14} className="item-icon" />

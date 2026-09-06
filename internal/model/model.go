@@ -173,6 +173,91 @@ type ExecutionLog struct {
 // FlowSchedule records a cron trigger for a flow. Enabled controls whether the
 // scheduler fires it; JobID is the opaque handle returned by the scheduling
 // backend for the currently-registered job.
+// BackgroundDocument is reusable business context owned by a test set.
+type BackgroundDocument struct {
+	ID        uint           `gorm:"primarykey" json:"id"`
+	TestSetID uint           `gorm:"index;not null" json:"test_set_id"`
+	Name      string         `gorm:"size:128;not null" json:"name"`
+	Content   string         `gorm:"type:text;not null" json:"content"`
+	CreatedBy uint           `json:"created_by"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty"`
+}
+
+// CaseFlow is the metadata container for a versioned case tree.
+type CaseFlow struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	TestSetID uint      `gorm:"index;not null" json:"test_set_id"`
+	Name      string    `gorm:"size:128;not null" json:"name"`
+	CreatedBy uint      `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CaseFlowDraft stores the editable case tree and source bindings.
+type CaseFlowDraft struct {
+	ID         uint      `gorm:"primarykey" json:"id"`
+	CaseFlowID uint      `gorm:"uniqueIndex;not null" json:"case_flow_id"`
+	Tree       string    `gorm:"type:text;not null" json:"tree"`
+	Revision   uint      `gorm:"not null;default:1" json:"revision"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// CaseFlowVersion is immutable and contains a complete tree snapshot.
+type CaseFlowVersion struct {
+	ID         uint      `gorm:"primarykey" json:"id"`
+	CaseFlowID uint      `gorm:"index;not null" json:"case_flow_id"`
+	VersionNo  int       `gorm:"not null" json:"version_no"`
+	Tree       string    `gorm:"type:text;not null" json:"tree"`
+	Sources    string    `gorm:"type:text;not null" json:"sources"`
+	CreatedBy  uint      `json:"created_by"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// CaseSource binds a Case Flow to a document or a resolved interface scope.
+type CaseSource struct {
+	ID         uint      `gorm:"primarykey" json:"id"`
+	CaseFlowID uint      `gorm:"index;not null" json:"case_flow_id"`
+	Kind       string    `gorm:"size:32;not null" json:"kind"`
+	DocumentID uint      `gorm:"index" json:"document_id,omitempty"`
+	Scope      string    `gorm:"type:text" json:"scope,omitempty"`
+	Snapshot   string    `gorm:"type:text" json:"snapshot"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// CaseNode stores stable case identity/status independently from tree snapshots.
+type CaseNode struct {
+	ID         uint      `gorm:"primarykey" json:"id"`
+	CaseFlowID uint      `gorm:"index;not null" json:"case_flow_id"`
+	NodeKey    string    `gorm:"size:128;not null" json:"node_key"`
+	Status     string    `gorm:"size:16;not null;default:uncovered" json:"status"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// CaseFlowSession persists the independent Case Flow Agent dialog history.
+type CaseFlowSession struct {
+	ID               uint      `gorm:"primarykey" json:"id"`
+	CaseFlowID       uint      `gorm:"uniqueIndex;not null" json:"case_flow_id"`
+	CreatedBy        uint      `json:"created_by"`
+	Status           string    `gorm:"size:16;not null;default:active" json:"status"`
+	Messages         string    `gorm:"type:text" json:"messages"`
+	PendingQuestions string    `gorm:"type:text" json:"pending_questions,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// CaseCoverage links a case node to an immutable execution flow version.
+type CaseCoverage struct {
+	ID            uint      `gorm:"primarykey" json:"id"`
+	CaseNodeID    uint      `gorm:"uniqueIndex:idx_case_coverage" json:"case_node_id"`
+	FlowVersionID uint      `gorm:"uniqueIndex:idx_case_coverage" json:"flow_version_id"`
+	Snapshot      string    `gorm:"type:text" json:"snapshot"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type FlowSchedule struct {
 	ID        uint      `gorm:"primarykey" json:"id" example:"1"`
 	FlowID    uint      `gorm:"index;not null" json:"flow_id" example:"1"`
@@ -191,5 +276,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Import{}, &Provider{}, &TestUnit{},
 		&TestFlow{}, &FlowDraft{}, &FlowVersion{},
 		&ExecutionLog{}, &FlowSession{}, &FlowSchedule{},
+		&BackgroundDocument{}, &CaseFlow{}, &CaseFlowDraft{}, &CaseFlowVersion{},
+		&CaseSource{}, &CaseNode{}, &CaseCoverage{}, &CaseFlowSession{},
 	)
 }
