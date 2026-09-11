@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github/hchw/kianshu/internal/openai/vendor"
 )
 
 // Message is one OpenAI-compatible chat message.
@@ -93,6 +95,43 @@ type Client struct {
 	HTTP *http.Client
 }
 
+// sessionIDKey 是 context 中携带对话会话 ID 的键。同一段对话的所有轮次
+// 复用同一个值,使 opencode 侧能优化路由与提示词缓存。
+type sessionIDKey struct{}
+
+// WithSessionID 在 ctx 上挂载一段对话的稳定会话 ID。空串原样返回。
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	if sessionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, sessionIDKey{}, sessionID)
+}
+
+// SessionIDFrom 读取 ctx 上挂载的对话会话 ID,不存在时返回空串。
+func SessionIDFrom(ctx context.Context) string {
+	if v, ok := ctx.Value(sessionIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// newProviderRequest 构造一次 provider 调用的 HTTP 请求并写入公共请求头。
+// 厂商特有的请求头(如 opencode 的专属 User-Agent 与会话头)委托
+// vendor 子包按 URL 适配。
+func newProviderRequest(ctx context.Context, p Provider, body []byte) (*http.Request, error) {
+	url := strings.TrimRight(p.GetBaseURL(), "/") + "/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if k := p.GetAPIKey(); k != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+k)
+	}
+	vendor.ApplyHeaders(httpReq.Header, p.GetBaseURL(), SessionIDFrom(ctx))
+	return httpReq, nil
+}
+
 // New returns a client with a sane timeout.
 func New() *Client {
 	return &Client{HTTP: &http.Client{Timeout: 60 * time.Second}}
@@ -124,14 +163,9 @@ func (c *Client) ChatCompletion(ctx context.Context, p Provider, req CompletionR
 	if err != nil {
 		return nil, err
 	}
-	url := strings.TrimRight(p.GetBaseURL(), "/") + "/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := newProviderRequest(ctx, p, body)
 	if err != nil {
 		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if k := p.GetAPIKey(); k != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+k)
 	}
 	resp, err := c.HTTP.Do(httpReq)
 	if err != nil {
@@ -195,14 +229,9 @@ func (c *Client) StreamChatCompletion(ctx context.Context, p Provider, req Compl
 	if err != nil {
 		return nil, err
 	}
-	url := strings.TrimRight(p.GetBaseURL(), "/") + "/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := newProviderRequest(ctx, p, body)
 	if err != nil {
 		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if k := p.GetAPIKey(); k != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+k)
 	}
 	resp, err := c.HTTP.Do(httpReq)
 	if err != nil {

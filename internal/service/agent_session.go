@@ -28,6 +28,17 @@ func LockFlow(flowID uint) func() {
 	return sessionLocks.TryLock(flowID)
 }
 
+// flowProviderSessionID 为一段流对话生成稳定的 provider 会话标识,用作
+// opencode 的 x-opencode-session 请求头(同一段对话跨轮次/跨提交复用)。
+func flowProviderSessionID(flowID, sessionID uint) string {
+	return fmt.Sprintf("kianshu-flow-%d-session-%d", flowID, sessionID)
+}
+
+// caseProviderSessionID 为一段用例流对话生成稳定的 provider 会话标识。
+func caseProviderSessionID(caseFlowID, sessionID uint) string {
+	return fmt.Sprintf("kianshu-case-%d-session-%d", caseFlowID, sessionID)
+}
+
 // GetFlowSession returns the dialog session of a flow, creating one if absent.
 func GetFlowSession(db *gorm.DB, flowID, userID uint) (*model.FlowSession, error) {
 	var s model.FlowSession

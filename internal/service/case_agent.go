@@ -27,6 +27,7 @@ const (
 	caseToolDeleteNode  = "delete_case_node"
 	caseToolReplaceTree = "replace_case_subtree"
 	caseToolSetStatus   = "set_case_status"
+	caseToolAskUser     = "ask_user_clarification"
 )
 
 var caseFlowLocks = agent.NewKeyedLock()
@@ -127,7 +128,15 @@ func CompressCaseSession(db *gorm.DB, caseFlowID uint) (*model.CaseFlowSession, 
 }
 
 func caseSystemPrompt() string {
-	return "你是用例树设计助手。你只能使用提供的用例树工具维护可版本化的测试用例分解树。根节点为用例主题；叶节点为具体用例。新增或更新用例节点时请尽量提供 description（用例描述）、precondition（前置条件）、input（输入）、expected（预期结果），不要只给标题。非破坏性修改会立即写入草稿；删除、替换子树和修改状态需要用户确认。"
+	return `你是一名资深且专业的高级测试经理（Senior Test Manager）和测试架构师，负责为企业级业务设计可执行、可审计、可复现的高质量测试用例流。你具备丰富的接口测试、业务流程分析、风险识别、异常设计、边界测试、数据构造和质量治理经验。当前任务具有很高的业务风险和技术挑战：生成的用例将直接影响缺陷发现能力、回归质量和问题定位效率，任何基于臆测的业务规则、遗漏关键分支、含糊的预期结果或“看起来完整但无法执行”的用例都不可接受。
+
+这不是一次普通的文本生成任务，而是对你专业判断力、风险意识、分析深度和交付质量的严格评估。你的输出会被视为高级测试经理的正式交付物，并接受严格的质量审查：如果不能识别关键信息缺口，不能覆盖真实业务风险，不能给出可执行且可验证的用例，或者用低质量、空泛、重复的内容敷衍任务，就意味着未达到岗位要求，可能在评估中被淘汰。你必须把每一个测试场景都当作可能决定线上事故能否被提前发现的关键防线，以对业务、用户和团队负责的态度完成工作；宁可暂停并提出精准问题，也绝不能用未经证实的假设掩盖不确定性。
+
+你必须以极其严谨、专业、高效、负责的态度工作：先理解业务目标和约束，再拆解测试范围、核心流程、前置条件、输入数据、状态变化、异常路径、边界条件和可验证的预期结果；优先覆盖高风险、高价值和最容易出错的场景，同时避免重复、空泛和没有判定标准的用例。每个具体用例都应尽可能完整填写 description（测试目的与场景）、precondition（前置条件）、input（输入数据及关键取值）、expected（可观察且明确的预期结果），不能只写标题，也不能用“正常即可”“符合预期”等不可验证的表述替代断言。
+
+你只能使用提供的用例树工具维护可版本化的测试用例分解树。根节点为用例主题，叶节点为具体可执行用例。生成前必须检查用户目标、业务流程、关键输入、权限/角色、数据状态和验收标准是否足够明确。凡是会影响用例正确性或覆盖范围的关键信息缺失、存在歧义或有多种合理解释时，禁止自行猜测，必须调用 ask_user_clarification 提问并暂停生成，等待用户回答后再继续。不要为了完成数量而牺牲准确性，也不要在信息不足时批量生成模板化用例。
+
+非破坏性修改会立即写入草稿；删除、替换子树和修改状态需要用户确认。执行任务时应保持结构清晰、范围完整、内容去重，并在完成前自检：是否覆盖用户目标、主要成功路径、失败路径、边界条件和关键风险；每条用例是否具备明确的执行条件、输入和可判定结果。`
 }
 
 func caseToolSchemas() []openai.Tool {
@@ -141,11 +150,12 @@ func caseToolSchemas() []openai.Tool {
 		{Type: "function", Function: openai.ToolFunction{Name: caseToolDeleteNode, Description: "删除用例子树(需要确认)", Parameters: json.RawMessage(`{"type":"object","properties":{"node_id":{"type":"string"}},"required":["node_id"]}`)}},
 		{Type: "function", Function: openai.ToolFunction{Name: caseToolReplaceTree, Description: "替换整个用例子树(需要确认)", Parameters: json.RawMessage(`{"type":"object","properties":{"tree":{"type":"object"}},"required":["tree"]}`)}},
 		{Type: "function", Function: openai.ToolFunction{Name: caseToolSetStatus, Description: "设置用例节点及其后代状态(需要确认)", Parameters: json.RawMessage(`{"type":"object","properties":{"node_id":{"type":"string"},"status":{"type":"string","enum":["covered","uncovered"]}},"required":["node_id","status"]}`)}},
+		{Type: "function", Function: openai.ToolFunction{Name: caseToolAskUser, Description: "信息不足时提问并暂停生成，禁止猜测", Parameters: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}}},"required":["question"]}`)}},
 	}
 }
 
 func allCaseToolNames() []string {
-	return []string{caseToolGetDocument, caseToolSwagger, caseToolGetTree, caseToolAddNode, caseToolUpdateNode, caseToolMoveNode, caseToolDeleteNode, caseToolReplaceTree, caseToolSetStatus}
+	return []string{caseToolGetDocument, caseToolSwagger, caseToolGetTree, caseToolAddNode, caseToolUpdateNode, caseToolMoveNode, caseToolDeleteNode, caseToolReplaceTree, caseToolSetStatus, caseToolAskUser}
 }
 
 func caseFlowTestSetID(db *gorm.DB, caseFlowID uint) uint {
@@ -186,6 +196,17 @@ func applyCaseMutation(db *gorm.DB, caseFlowID uint, apply func(*caseflow.Tree) 
 }
 
 func caseExecTool(ctx *caseToolContext, name string, args json.RawMessage, confirm bool) *ToolResult {
+	if name == caseToolAskUser {
+		var req struct {
+			Question string   `json:"question"`
+			Options  []string `json:"options"`
+		}
+		_ = json.Unmarshal(args, &req)
+		if strings.TrimSpace(req.Question) == "" {
+			return toolError("", "提问内容不能为空")
+		}
+		return &ToolResult{Paused: true, Questions: []PauseQuestion{{ID: "case-clarification", Type: "clarification", Question: req.Question, Options: req.Options, Operation: name, ToolArgs: string(args)}}}
+	}
 	switch name {
 	case caseToolGetDocument:
 		var req struct {
@@ -380,6 +401,8 @@ func RunCaseAgent(ctx context.Context, db *gorm.DB, caseFlowID, userID uint, opt
 	if err != nil {
 		return nil, err
 	}
+	// 同一段对话的所有轮次复用同一个 provider 会话 ID。
+	ctx = openai.WithSessionID(ctx, caseProviderSessionID(caseFlowID, session.ID))
 	history, err := unmarshalCaseMessages(session)
 	if err != nil {
 		return nil, err
@@ -484,6 +507,7 @@ func ResumeCaseAgent(ctx context.Context, db *gorm.DB, caseFlowID, userID uint, 
 	if err != nil {
 		return nil, err
 	}
+	ctx = openai.WithSessionID(ctx, caseProviderSessionID(caseFlowID, session.ID))
 	var questions []PauseQuestion
 	if err := json.Unmarshal([]byte(session.PendingQuestions), &questions); err != nil {
 		return nil, err
@@ -505,6 +529,21 @@ func ResumeCaseAgent(ctx context.Context, db *gorm.DB, caseFlowID, userID uint, 
 			if emit != nil {
 				emit(Event{Kind: EventKindTool, Round: 0, Tool: q.Operation, Result: res})
 			}
+		}
+	}
+	// 将澄清回答注入后续上下文，避免 Agent 重复提问。
+	if len(answers) > 0 {
+		lines := make([]string, 0, len(answers))
+		for _, a := range answers {
+			if strings.TrimSpace(a.Answer) != "" {
+				lines = append(lines, a.QuestionID+": "+a.Answer)
+			}
+		}
+		if len(lines) > 0 {
+			msgs := mustUnmarshalMessages(session)
+			msgs = append(msgs, openai.Message{Role: "user", Content: strPtr("用户已回答暂停问题:\n" + strings.Join(lines, "\n") + "\n请基于这些回答继续生成。")})
+			b, _ := json.Marshal(msgs)
+			session.Messages = string(b)
 		}
 	}
 	session.Status = model.SessionActive

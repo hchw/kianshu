@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  caseFlowExportURL,
+  downloadCaseFlowXMind,
   deleteCaseNode,
   getCaseTreeView,
   listCaseFlowVersions,
@@ -53,7 +53,7 @@ export default function CaseFlowEditor() {
   }
 
   const deleteNode = async (nodeID: string) => {
-    if (nodeID === tree?.id || !window.confirm('确认删除该节点及其全部后代？')) return
+    if (nodeID === tree?.id) return
     try {
       await deleteCaseNode(id, nodeID, revision)
       setSelected(null)
@@ -73,7 +73,10 @@ export default function CaseFlowEditor() {
     catch (e) { toast.error(apiError(e)) }
   }
 
-  const exportURL = caseFlowExportURL(id)
+  const exportXMind = async (version?: number) => {
+    try { await downloadCaseFlowXMind(id, version); toast.success('XMind 导出成功') }
+    catch (e) { toast.error(apiError(e)) }
+  }
 
   return (
     <AppLayout full title="用例流编辑器">
@@ -86,8 +89,8 @@ export default function CaseFlowEditor() {
             <section className="card side-card">
               <h3>版本</h3>
               <button className="primary" onClick={saveVersion}>保存当前草稿为新版本</button>
-              <div className="list">{versions.map((v) => <div key={v.id} className="card item row"><span className="strong">版本 {v.version_no}</span><button className="link" onClick={() => restore(v.version_no)}>恢复</button><a className="link" href={`${exportURL.url}&version=${v.version_no}`}>导出</a></div>)}</div>
-              <a className="link" href={exportURL.url}>导出当前草稿</a>
+              <div className="list">{versions.map((v) => <div key={v.id} className="card item row"><span className="strong">版本 {v.version_no}</span><button className="link" onClick={() => restore(v.version_no)}>恢复</button><button className="link" onClick={() => void exportXMind(v.version_no)}>导出 XMind</button></div>)}</div>
+              <button className="link" onClick={() => void exportXMind()}>导出当前草稿 XMind</button>
             </section>
             <section className="card side-card">
               <h3>来源</h3>

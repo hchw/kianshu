@@ -2,10 +2,13 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github/hchw/kianshu/internal/caseflow"
+	"github/hchw/kianshu/internal/model"
 	"github/hchw/kianshu/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -200,6 +203,27 @@ func (s *Server) handleCreateCaseFlow(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeErr(c, http.StatusBadRequest, "请求体不合法")
 		return
+	}
+	// 前端默认以 all 作为来源；测试集没有背景文档和接口测试单元时，
+	// 创建出的用例流没有可生成的内容。
+	for _, source := range req.Sources {
+		if source.Kind != "all" {
+			continue
+		}
+		var documents, units int64
+		if err := s.DB.Model(&model.BackgroundDocument{}).Where("test_set_id = ?", setID).Count(&documents).Error; err != nil {
+			writeErr(c, http.StatusInternalServerError, "查询测试集资源失败")
+			return
+		}
+		if err := s.DB.Model(&model.TestUnit{}).Where("test_set_id = ?", setID).Count(&units).Error; err != nil {
+			writeErr(c, http.StatusInternalServerError, "查询测试集资源失败")
+			return
+		}
+		if documents == 0 && units == 0 {
+			writeErr(c, http.StatusBadRequest, "测试集至少需要一个背景文档或测试单元")
+			return
+		}
+		break
 	}
 	cf, err := service.CreateCaseFlow(s.DB, setID, uid, req.Name, req.Sources)
 	if err != nil {
@@ -582,6 +606,9 @@ func (s *Server) handleExportCaseFlow(c *gin.Context) {
 		writeErr(c, http.StatusNotFound, "导出失败")
 		return
 	}
-	c.Header("Content-Disposition", "attachment; filename="+filename)
+	// 同时提供 ASCII 回退文件名和 RFC 5987 UTF-8 文件名，避免中文文件名在浏览器中乱码。
+	encodedFilename := url.PathEscape(filename)
+	fallback := fmt.Sprintf("case-flow-%d.xmind", cfID)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, fallback, encodedFilename))
 	c.Data(http.StatusOK, "application/vnd.xmind.workbook", data)
 }
