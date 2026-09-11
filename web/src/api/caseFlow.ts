@@ -169,10 +169,23 @@ export async function listCaseNodeFlows(caseFlowID: number, nodeID: string) {
   return data.flows
 }
 
-export function caseFlowExportURL(caseFlowID: number, version?: number) {
-  const token = localStorage.getItem('kianshu_token') ?? ''
-  const q = version ? `?version=${version}` : ''
-  return { url: `/api/case-flows/${caseFlowID}/export${q}`, token }
+export async function downloadCaseFlowXMind(caseFlowID: number, version?: number) {
+  const { data, headers } = await api.get<Blob>(`/case-flows/${caseFlowID}/export`, {
+    params: version ? { version } : undefined,
+    responseType: 'blob',
+  })
+  const disposition = String(headers['content-disposition'] ?? '')
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  const fallback = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+  const filename = encoded ? decodeURIComponent(encoded) : (fallback ?? `case-flow-${caseFlowID}.xmind`)
+  const url = URL.createObjectURL(data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 export interface CaseAgentSession {

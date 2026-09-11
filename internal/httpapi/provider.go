@@ -1,10 +1,11 @@
 package httpapi
 
 import (
-	"context"
+	"fmt"
 	"net/http"
 
 	"github/hchw/kianshu/internal/model"
+	"github/hchw/kianshu/internal/openai"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,18 +16,18 @@ type providerReq struct {
 	APIKey  string `json:"api_key" example:"sk-xxx"`
 	Model   string `json:"model" example:"gpt-4"`
 	// StrictContent 为 true 时,client 把 null content 改为空串,兼容 ollama/vLLM。
-	StrictContent bool `json:"strict_content" example:"false"`
-	Enabled *bool  `json:"enabled" example:"true"`
+	StrictContent bool  `json:"strict_content" example:"false"`
+	Enabled       *bool `json:"enabled" example:"true"`
 }
 
 // providerView strips sensitive fields for responses.
 type providerView struct {
-	ID      uint   `json:"id" example:"1"`
-	Name    string `json:"name" example:"我的 OpenAI"`
-	BaseURL string `json:"base_url" example:"https://api.openai.com"`
-	Model   string `json:"model" example:"gpt-4"`
+	ID            uint   `json:"id" example:"1"`
+	Name          string `json:"name" example:"我的 OpenAI"`
+	BaseURL       string `json:"base_url" example:"https://api.openai.com"`
+	Model         string `json:"model" example:"gpt-4"`
 	StrictContent bool   `json:"strict_content" example:"false"`
-	Enabled bool   `json:"enabled" example:"true"`
+	Enabled       bool   `json:"enabled" example:"true"`
 }
 
 func toView(p model.Provider) providerView {
@@ -79,10 +80,10 @@ func (s *Server) handleCreateProvider(c *gin.Context) {
 		return
 	}
 	p := model.Provider{
-		UserID:    uid,
-		Name:      req.Name,
-		BaseURL:   req.BaseURL,
-		APIKeyEnc: enc,
+		UserID:        uid,
+		Name:          req.Name,
+		BaseURL:       req.BaseURL,
+		APIKeyEnc:     enc,
 		Model:         req.Model,
 		StrictContent: req.StrictContent,
 		Enabled:       true,
@@ -211,6 +212,12 @@ func (s *Server) handleDeleteProvider(c *gin.Context) {
 	writeJSON(c, http.StatusOK, gin.H{"ok": true})
 }
 
+// providerTestSessionID 为 provider 连通性测试生成稳定的会话标识,
+// 使 opencode 等厂商的测试请求走同一适配路径。
+func providerTestSessionID(providerID uint) string {
+	return fmt.Sprintf("kianshu-provider-%d-test", providerID)
+}
+
 type providerAdapter struct {
 	baseURL       string
 	apiKey        string
@@ -254,7 +261,10 @@ func (s *Server) handleTestProvider(c *gin.Context) {
 		return
 	}
 	adapter := &providerAdapter{p.BaseURL, key, p.Model, p.StrictContent}
-	if err := s.LLM.Test(context.Background(), adapter); err != nil {
+	// 连通性测试同样经厂商适配(如 opencode 的专属 UA 与会话头),
+	// 并透传请求 ctx 以支持取消。
+	ctx := openai.WithSessionID(c.Request.Context(), providerTestSessionID(p.ID))
+	if err := s.LLM.Test(ctx, adapter); err != nil {
 		writeJSON(c, http.StatusOK, gin.H{"ok": false, "error": err.Error()})
 		return
 	}

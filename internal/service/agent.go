@@ -451,6 +451,8 @@ func RunAgent(ctx context.Context, db *gorm.DB, flowID, userID uint, opt AgentOp
 	if err != nil {
 		return nil, err
 	}
+	// 同一段对话的所有轮次复用同一个 provider 会话 ID。
+	ctx = openai.WithSessionID(ctx, flowProviderSessionID(flowID, session.ID))
 
 	history, err := unmarshalSessionMessages(session)
 	if err != nil {

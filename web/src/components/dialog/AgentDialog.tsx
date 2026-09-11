@@ -408,9 +408,22 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, ini
 
   const newSession = async () => {
     try {
+      // 新会话必须立即清理旧会话的暂停问题和已填写回答，避免旧问题残留。
+      abortRef.current?.abort()
+      subRef.current?.abort()
+      setQuestions([])
+      setAnswers({})
+      setStatus('active')
+      setMessages([])
+      setEvents([])
+      setRoundTexts({})
+      setRoundReasonings({})
+      setLiveRound(null)
+      setLiveText('')
+      setLiveReasoning('')
+      setErr('')
       await agentNew(flowID)
       await refreshSession()
-      setEvents([])
       onChanged()
     } catch (e) {
       setErr(apiError(e))

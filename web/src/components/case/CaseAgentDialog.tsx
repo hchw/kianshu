@@ -86,7 +86,22 @@ export default function CaseAgentDialog({ caseFlowID, providers, tree, onChanged
     })
   }
 
-  const reset = async () => { try { await caseAgentNew(caseFlowID); setMessages([]); setEvents([]); toast.success('已开始新会话') } catch (e) { setError(apiError(e)) } }
+  const reset = async () => {
+ try {
+  abortRef.current?.abort()
+  setQuestions([])
+  setAnswers({})
+  setStatus('active')
+  setMessages([])
+  setEvents([])
+  setLiveText('')
+  setLiveReasoning('')
+  setError('')
+  await caseAgentNew(caseFlowID)
+  await refresh()
+  toast.success('已开始新会话')
+ } catch (e) { setError(apiError(e)) }
+}
   const compress = async () => { try { await caseAgentCompress(caseFlowID); await refresh(); toast.success('会话已压缩') } catch (e) { setError(apiError(e)) } }
 
   return <div className="card side-card case-agent-dialog">

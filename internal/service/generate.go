@@ -67,6 +67,7 @@ func GenerateFlow(ctx context.Context, db *gorm.DB, flowID, userID uint, instruc
 	if err != nil {
 		return nil, err
 	}
+	ctx = openai.WithSessionID(ctx, flowProviderSessionID(flowID, session.ID))
 	history, err := unmarshalSessionMessages(session)
 	if err != nil {
 		return nil, err
@@ -214,6 +215,7 @@ func ResumeGeneration(ctx context.Context, db *gorm.DB, flowID, userID uint, ans
 	if err != nil {
 		return nil, err
 	}
+	ctx = openai.WithSessionID(ctx, flowProviderSessionID(flowID, session.ID))
 	history, err := unmarshalSessionMessages(session)
 	if err != nil {
 		return nil, err
