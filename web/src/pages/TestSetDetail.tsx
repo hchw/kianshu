@@ -23,7 +23,7 @@ import PopConfirm from '../components/dialog/PopConfirm'
 import { useToast } from '../components/feedback/Toast'
 import { GitBranch, Pencil } from 'lucide-react'
 
-type Tab = 'overview' | 'import' | 'units' | 'members' | 'case'
+type Tab = 'overview' | 'import' | 'members' | 'case' | 'execution'
 
 export default function TestSetDetail() {
   const { id } = useParams()
@@ -147,21 +147,23 @@ export default function TestSetDetail() {
           概览
         </button>
         <button className={tab === 'import' ? 'tab on' : 'tab'} onClick={() => setTab('import')}>
-          导入
-        </button>
-        <button className={tab === 'units' ? 'tab on' : 'tab'} onClick={() => setTab('units')}>
           测试单元
-        </button>
-        <button className={tab === 'members' ? 'tab on' : 'tab'} onClick={() => setTab('members')}>
-          成员
         </button>
         <button className={tab === 'case' ? 'tab on' : 'tab'} onClick={() => setTab('case')}>
           用例
         </button>
+        <button className={tab === 'execution' ? 'tab on' : 'tab'} onClick={() => setTab('execution')}>
+          执行
+        </button>
+        <button className={tab === 'members' ? 'tab on' : 'tab'} onClick={() => setTab('members')}>
+          成员
+        </button>
       </nav>
 
-      {tab === 'overview' && (
+      {(tab === 'overview' || tab === 'execution') && (
         <div className="stack">
+          {tab === 'overview' && <>
+          <CaseFlowPanel testSetID={testSetID} documentsOnly />
           <div className="card">
             <h3>基础信息</h3>
             <div className="row">
@@ -171,7 +173,8 @@ export default function TestSetDetail() {
               </button>
             </div>
           </div>
-          <div className="card">
+          </>}
+          {tab === 'execution' && <div className="card">
             <h3>测试流</h3>
             <form className="row" onSubmit={create}>
               <input
@@ -258,12 +261,16 @@ export default function TestSetDetail() {
                 ))
               )}
             </div>
-          </div>
+          </div>}
         </div>
       )}
 
-      {tab === 'import' && <ImportPanel testSetID={testSetID} onImported={load} />}
-      {tab === 'units' && <UnitsBrowser testSetID={testSetID} />}
+      {tab === 'import' && (
+        <div className="stack">
+          <ImportPanel testSetID={testSetID} onImported={load} />
+          <UnitsBrowser testSetID={testSetID} />
+        </div>
+      )}
       {tab === 'members' && <MembersPanel testSetID={testSetID} ownerID={set.owner_id} />}
       {tab === 'case' && <CaseFlowPanel testSetID={testSetID} />}
     </AppLayout>

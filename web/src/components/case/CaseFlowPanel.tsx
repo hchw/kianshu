@@ -5,6 +5,7 @@ import {
   createCaseFlow,
   deleteBackgroundDoc,
   deleteCaseFlow,
+  duplicateCaseFlow,
   listBackgroundDocs,
   listCaseFlows,
   renameCaseFlow,
@@ -16,8 +17,9 @@ import { apiError } from '../../api/client'
 import { useToast } from '../feedback/Toast'
 import { EmptyState } from '../feedback/EmptyState'
 import PopConfirm from '../dialog/PopConfirm'
+import { GitBranch } from 'lucide-react'
 
-export default function CaseFlowPanel({ testSetID }: { testSetID: number }) {
+export default function CaseFlowPanel({ testSetID, documentsOnly = false }: { testSetID: number; documentsOnly?: boolean }) {
   const nav = useNavigate()
   const toast = useToast()
   const [docs, setDocs] = useState<BackgroundDocument[]>([])
@@ -125,10 +127,17 @@ export default function CaseFlowPanel({ testSetID }: { testSetID: number }) {
       await load()
     } catch (e) { setErr(apiError(e)) }
   }
+  const duplicateCf = async (cf: CaseFlow, name: string) => {
+    try {
+      await duplicateCaseFlow(cf.id, name)
+      toast.success('用例流已复制')
+      await load()
+    } catch (e) { setErr(apiError(e)); toast.error(apiError(e)) }
+  }
   return (
     <div className="stack">
       {err && <div className="err">{err}</div>}
-      <div className="card">
+      {documentsOnly && <div className="card">
         <h3>背景文档</h3>
         <form className="stack" onSubmit={editingDocID ? saveDoc : addDoc}>
           <input placeholder="文档名称" value={name} onChange={(e) => setName(e.target.value)} />
@@ -149,15 +158,22 @@ export default function CaseFlowPanel({ testSetID }: { testSetID: number }) {
             ))
           )}
         </div>
-      </div>
-      <div className="card">
+      </div>}
+      {!documentsOnly && <div className="card">
         <h3>用例流</h3>
         <form className="row" onSubmit={addCaseFlow}>
           <input placeholder="新用例流名称" value={cfName} onChange={(e) => setCfName(e.target.value)} />
           <button type="submit" className="primary">创建</button>
         </form>
         <div className="list">
-          {caseFlows.map((cf) => (
+          {caseFlows.length === 0 ? (
+            <EmptyState
+              compact
+              icon={<GitBranch size={24} strokeWidth={1.5} aria-hidden="true" />}
+              title="还没有用例流"
+              hint="输入名称创建第一个用例流"
+            />
+          ) : caseFlows.map((cf) => (
                   <div key={cf.id} className="card item row">
                     {editingCfID === cf.id ? (
                       <form className="row" onSubmit={(e) => { e.preventDefault(); void saveCfRename(cf) }}>
@@ -169,16 +185,26 @@ export default function CaseFlowPanel({ testSetID }: { testSetID: number }) {
                       <>
                         <span className="strong" style={{ cursor: 'pointer' }} onClick={() => nav(`/case-flows/${cf.id}`)}>{cf.name}</span>
                         <button className="link" onClick={() => { setEditingCfID(cf.id); setEditingCfName(cf.name) }}>改名</button>
+                        <span style={{ flex: 1 }} />
+                        <button className="link" onClick={() => nav(`/case-flows/${cf.id}`)}>打开编辑器 →</button>
+                        <PopConfirm
+                          title="复制用例流"
+                          message={`将「${cf.name}」复制为新的用例流`}
+                          input={{ defaultValue: `${cf.name} 副本`, placeholder: '新用例流名称' }}
+                          confirmText="复制"
+                          onConfirm={(name) => void duplicateCf(cf, name)}
+                        >
+                          <button className="link">复制</button>
+                        </PopConfirm>
                         <PopConfirm danger message={`确认删除用例流「${cf.name}」？该操作不可恢复。`} onConfirm={() => void removeCf(cf)}>
                           <button className="link danger">删除</button>
                         </PopConfirm>
-                        <button className="link" onClick={() => nav(`/case-flows/${cf.id}`)}>打开编辑器 →</button>
                       </>
                     )}
                   </div>
                 ))}
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

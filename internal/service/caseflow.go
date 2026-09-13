@@ -187,6 +187,60 @@ func RenameCaseFlow(db *gorm.DB, caseFlowID uint, name string) (*model.CaseFlow,
 	return &cf, nil
 }
 
+// DuplicateCaseFlow 复制用例流的当前草稿、来源和节点状态，不复制历史版本。
+func DuplicateCaseFlow(db *gorm.DB, caseFlowID, userID uint, name string) (*model.CaseFlow, error) {
+	var src model.CaseFlow
+	if err := db.First(&src, caseFlowID).Error; err != nil {
+		return nil, ErrCaseFlowNotFound
+	}
+	newName := strings.TrimSpace(name)
+	if newName == "" {
+		newName = src.Name + " 副本"
+	}
+	var dup *model.CaseFlow
+	err := db.Transaction(func(tx *gorm.DB) error {
+		dup = &model.CaseFlow{TestSetID: src.TestSetID, Name: newName, CreatedBy: userID}
+		if err := tx.Create(dup).Error; err != nil {
+			return err
+		}
+		var draft model.CaseFlowDraft
+		if err := tx.Where("case_flow_id = ?", caseFlowID).First(&draft).Error; err != nil {
+			return err
+		}
+		newDraft := &model.CaseFlowDraft{CaseFlowID: dup.ID, Tree: draft.Tree, Revision: draft.Revision}
+		if err := tx.Create(newDraft).Error; err != nil {
+			return err
+		}
+		var sources []model.CaseSource
+		if err := tx.Where("case_flow_id = ?", caseFlowID).Find(&sources).Error; err != nil {
+			return err
+		}
+		for _, source := range sources {
+			source.ID = 0
+			source.CaseFlowID = dup.ID
+			if err := tx.Create(&source).Error; err != nil {
+				return err
+			}
+		}
+		var nodes []model.CaseNode
+		if err := tx.Where("case_flow_id = ?", caseFlowID).Find(&nodes).Error; err != nil {
+			return err
+		}
+		for _, node := range nodes {
+			node.ID = 0
+			node.CaseFlowID = dup.ID
+			if err := tx.Create(&node).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dup, nil
+}
+
 // DeleteCaseFlow removes a case flow and all owned data.
 func DeleteCaseFlow(db *gorm.DB, caseFlowID uint) error {
 	return db.Transaction(func(tx *gorm.DB) error {
