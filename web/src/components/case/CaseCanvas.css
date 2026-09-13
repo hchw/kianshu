@@ -62,7 +62,10 @@
   overflow: hidden;
 }
 
-.case-flow-node-selected .case-flow-node {
+/* 选中态由 React Flow 的 .selected 驱动：选区不参与 nodes 计算，
+   既保留 React Flow 内部选中态，也避免每次选中重建整棵节点。 */
+.react-flow__node.selected .case-flow-node {
+  border-color: var(--primary);
   box-shadow: 0 0 0 2px var(--primary), 0 0 14px 4px rgba(59, 130, 246, 0.35);
 }
 

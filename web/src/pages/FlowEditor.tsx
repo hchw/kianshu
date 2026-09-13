@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { apiError } from '../api/client'
 import {
@@ -17,6 +17,7 @@ import {
   type FlowVersion,
 } from '../api/flow'
 import { listProviders, type Provider } from '../api/providers'
+import { getFlowCaseSources, type FlowCaseSources } from '../api/caseFlow'
 import { listMembers } from '../api/testset'
 import { currentUser } from '../store/session'
 import { parseNodeResults } from '../components/results/ResultsPanel'
@@ -24,6 +25,7 @@ import type { NodeRunStatus } from '../components/canvas/FlowCanvas'
 import { parseTree, validateTreeShape, deleteNode } from '../lib/tree'
 import AppLayout from '../components/layout/AppLayout'
 import FlowCanvas from '../components/canvas/FlowCanvas'
+import CaseLinkList from '../components/case/CaseLinkList'
 import AgentDialog from '../components/dialog/AgentDialog'
 import ResultsPanel from '../components/results/ResultsPanel'
 import SchedulePanel from '../components/results/SchedulePanel'
@@ -65,6 +67,7 @@ export default function FlowEditor() {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [lastNodeResults, setLastNodeResults] = useState<Record<string, NodeRunStatus> | null>(null)
+  const [caseSources, setCaseSources] = useState<FlowCaseSources | null>(null)
 
   // 流系统提示词离开输入框即自动持久化（轻量只写文档列），避免编辑后未点
   // "保存草稿"就离开导致下次进入/提交读到旧值。失败时静默：Agent 提交会
@@ -93,6 +96,7 @@ export default function FlowEditor() {
       setRunsTotal(runsResp.total || 0)
       setRunsPage(1)
       setSystemPrompt(d.system_prompt ?? '')
+      getFlowCaseSources(fid).then(setCaseSources).catch(() => setCaseSources(null))
       // 只读成员不能编辑文档（后端仍会拒绝写请求，此为前置 UX）
       try {
         const m = await listMembers(d.test_set_id)
@@ -215,7 +219,8 @@ export default function FlowEditor() {
     try {
       await saveEnable(fid)
       setVersions(await listVersions(fid))
-      toast.success('版本已启用')
+      const covered = caseSources?.bound ? caseSources.binding?.leaves?.length ?? 0 : 0
+      toast.success(covered > 0 ? `版本已启用，已覆盖 ${covered} 个用例` : '版本已启用')
     } catch (e) {
       const is422 =
         typeof e === 'object' &&
@@ -263,6 +268,20 @@ export default function FlowEditor() {
       }
     >
       {err && <ErrorNote>{err}</ErrorNote>}
+      {caseSources?.bound && caseSources.binding && (
+        <div className="banner">
+          由 {caseSources.binding.leaves?.length ?? 0} 个用例生成 · 来源：
+          {caseSources.binding.sources.map((s) => `${s.name} v${s.version_no}`).join(' / ')}
+          {caseSources.binding.sources[0] && (
+            <>
+              {' · '}
+              <Link className="link" to={`/case-flows/${caseSources.binding.sources[0].case_flow_id}`}>
+                查看来源 →
+              </Link>
+            </>
+          )}
+        </div>
+      )}
       {(validation?.errors ?? []).length > 0 && (
         <div className="banner warn">
           校验错误 {(validation?.errors ?? []).length} 项:
@@ -284,6 +303,7 @@ export default function FlowEditor() {
           onDelete={handleDeleteNode}
           testSetID={draft.test_set_id}
           nodeResults={lastNodeResults}
+          leftPanelExtra={<CaseLinkList sources={caseSources} />}
         />
         <aside className={sideOpen ? 'side' : 'side collapsed'}>
           <button
@@ -375,6 +395,7 @@ export default function FlowEditor() {
               onTreePreview={onTreePreview}
               selectedNodeIDs={selectedNodeIDs}
               onSelectedNodeIDsChange={setSelectedNodeIDs}
+              caseBound={!!caseSources?.bound}
             />
             <SchedulePanel flowID={fid} />
             <ResultsPanel

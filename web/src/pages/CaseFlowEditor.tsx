@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   downloadCaseFlowXMind,
   deleteCaseNode,
+  getCaseFlow,
   getCaseTreeView,
   listCaseFlowVersions,
   listCaseSources,
   restoreCaseFlowVersion,
   saveCaseFlowVersion,
   updateCaseNode,
+  type CaseFlow,
   type CaseNode,
   type CaseSource,
   type CaseFlowVersion,
@@ -18,18 +20,24 @@ import { listProviders, type Provider } from '../api/providers'
 import AppLayout from '../components/layout/AppLayout'
 import CaseAgentDialog from '../components/case/CaseAgentDialog'
 import CaseCanvas from '../components/case/CaseCanvas'
+import CreateFlowDialog from '../components/case/CreateFlowDialog'
+import { dedupeSubtreeRoots } from '../lib/caseTree'
 import { useToast } from '../components/feedback/Toast'
 
 export default function CaseFlowEditor() {
   const { caseFlowID } = useParams()
   const id = Number(caseFlowID)
   const toast = useToast()
+  const [meta, setMeta] = useState<CaseFlow | null>(null)
   const [tree, setTree] = useState<CaseNode | null>(null)
   const [revision, setRevision] = useState(0)
   const [sources, setSources] = useState<CaseSource[]>([])
   const [versions, setVersions] = useState<CaseFlowVersion[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
   const [selected, setSelected] = useState<string | null>(null)
+  const [selectedIDs, setSelectedIDs] = useState<string[]>([])
+  const [clearSignal, setClearSignal] = useState(0)
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
@@ -39,6 +47,7 @@ export default function CaseFlowEditor() {
       setRevision(view.draft.revision)
       setSources(await listCaseSources(id))
       setVersions(await listCaseFlowVersions(id))
+      setMeta(await getCaseFlow(id))
     } catch (e) {
       setErr(apiError(e))
     }
@@ -46,6 +55,15 @@ export default function CaseFlowEditor() {
 
   useEffect(() => { void load(); void listProviders().then(setProviders).catch(() => setProviders([])) }, [load])
 
+  const selection = useMemo(() => dedupeSubtreeRoots(tree, selectedIDs), [tree, selectedIDs])
+
+  // React Flow 会以新数组身份反复回调 onSelectionChange；内容未变时返回原引用，
+  // 否则会触发「选中集变化 → 重算 nodes → 再同步 → 再回调」的无限更新。
+  const handleSelectionChange = useCallback((ids: string[]) => {
+    setSelectedIDs((prev) =>
+      prev.length === ids.length && prev.every((v, i) => v === ids[i]) ? prev : ids,
+    )
+  }, [])
 
   const savePosition = async (nodeID: string, x: number, y: number) => {
     try { await updateCaseNode(id, nodeID, revision, { x, y }); await load() }
@@ -57,6 +75,7 @@ export default function CaseFlowEditor() {
     try {
       await deleteCaseNode(id, nodeID, revision)
       setSelected(null)
+      setSelectedIDs((ids) => ids.filter((x) => x !== nodeID))
       toast.success('节点子树已删除')
       await load()
     } catch (e) { toast.error(apiError(e)) }
@@ -82,7 +101,21 @@ export default function CaseFlowEditor() {
     <AppLayout full title="用例流编辑器">
       {err && <div className="err">{err}</div>}
       <div className="editor-grid">
-        {tree ? <CaseCanvas caseFlowID={id} root={tree} selected={selected} onSelect={setSelected} onPositionChange={savePosition} onDelete={deleteNode} revision={revision} onSaved={load} /> : <div className="muted">暂无树</div>}
+        <div className="case-editor-col">
+          {tree ? <CaseCanvas caseFlowID={id} root={tree} selected={selected} onSelect={setSelected} onSelectionChange={handleSelectionChange} clearSignal={clearSignal} onPositionChange={savePosition} onDelete={deleteNode} revision={revision} onSaved={load} /> : <div className="muted">暂无树</div>}
+          <div className="case-action-bar">
+            <span className="muted">
+              {selection.roots.length > 0
+                ? `已选 ${selectedIDs.length} 个节点 → 去重后 ${selection.roots.length} 个子树根 · ${selection.nodes} 个用例节点`
+                : '在画布中选择一个或多个子树根'}
+            </span>
+            <span className="spacer" />
+            {selection.roots.length > 0 && <button className="link" onClick={() => setClearSignal((n) => n + 1)}>清除选择</button>}
+            <button className="primary" disabled={selection.roots.length === 0} onClick={() => setDialogOpen(true)}>
+              创建执行流 →
+            </button>
+          </div>
+        </div>
         <aside className="side">
           <div className="side-body">
             <CaseAgentDialog caseFlowID={id} providers={providers} tree={tree} onChanged={load} onTreePreview={(next) => setTree(next)} />
@@ -99,6 +132,16 @@ export default function CaseFlowEditor() {
           </div>
         </aside>
       </div>
+      {dialogOpen && tree && meta && (
+        <CreateFlowDialog
+          testSetID={meta.test_set_id}
+          caseFlowID={id}
+          caseFlowName={meta.name}
+          roots={selection.roots}
+          nodeCount={selection.nodes}
+          onClose={() => setDialogOpen(false)}
+        />
+      )}
     </AppLayout>
   )
 }

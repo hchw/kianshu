@@ -159,7 +159,7 @@ func runAndLog(db *gorm.DB, flowID, versionID uint, versionNo int, tree *flow.Tr
 	if err != nil {
 		return nil, err
 	}
-	log := &model.ExecutionLog{
+	entry := &model.ExecutionLog{
 		FlowID:      flowID,
 		VersionID:   versionID,
 		VersionNo:   versionNo,
@@ -169,10 +169,47 @@ func runAndLog(db *gorm.DB, flowID, versionID uint, versionNo int, tree *flow.Tr
 		StartedAt:   started,
 		FinishedAt:  finished,
 	}
-	if err := db.Create(log).Error; err != nil {
+	if err := db.Create(entry).Error; err != nil {
 		return nil, err
 	}
-	return log, nil
+	// 将本次运行的分支聚合结果回填到对应用例节点（C2）。回填失败不影响运行日志。
+	if err := backfillCaseRunResults(db, tree, res, finished); err != nil {
+		log.Printf("回填用例运行结果失败 flow=%d: %v", flowID, err)
+	}
+	return entry, nil
+}
+
+// backfillCaseRunResults writes each bound case's latest execution outcome
+// from a run. A case with several branches fails if any branch failed; the run
+// is the latest attempt so it always wins.
+func backfillCaseRunResults(db *gorm.DB, tree *flow.Tree, res *exec.RunResult, at time.Time) error {
+	type key struct {
+		cf   uint
+		node string
+	}
+	merged := map[key]string{}
+	for _, n := range tree.CaseUnitNodes() {
+		cfg, ok := flow.CaseUnitBinding(n)
+		if !ok {
+			continue
+		}
+		k := key{cfg.CaseFlowID, cfg.CaseNodeID}
+		status := model.CaseRunPassed
+		if r := res.Results[n.ID]; r == nil || r.Status != exec.StatusOK {
+			status = model.CaseRunFailed
+		}
+		if _, exists := merged[k]; !exists || status == model.CaseRunFailed {
+			merged[k] = status
+		}
+	}
+	for k, status := range merged {
+		if err := db.Model(&model.CaseNode{}).
+			Where("case_flow_id = ? AND node_key = ?", k.cf, k.node).
+			Updates(map[string]any{"last_run_result": status, "last_run_at": at}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ListRuns returns the execution logs of a flow, newest first, with

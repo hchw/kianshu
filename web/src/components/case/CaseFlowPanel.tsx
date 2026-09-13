@@ -127,7 +127,7 @@ export default function CaseFlowPanel({ testSetID, documentsOnly = false }: { te
       await load()
     } catch (e) { setErr(apiError(e)) }
   }
-  const duplicateCf = async (cf: CaseFlow, name: string) => {
+  const duplicateCf = async (cf: CaseFlow, name?: string) => {
     try {
       await duplicateCaseFlow(cf.id, name)
       toast.success('用例流已复制')

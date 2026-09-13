@@ -55,6 +55,7 @@ func Validate(t *Tree, opts ValidatorOptions) Result {
 	for _, e := range t.ValidateTreeShape() {
 		res.Errors = append(res.Errors, e)
 	}
+	res.Errors = append(res.Errors, t.validateCaseUnits()...)
 	res.Errors = append(res.Errors, t.validateIOContracts()...)
 	res.Errors = append(res.Errors, t.validateAdapters()...)
 	res.Errors = append(res.Errors, t.validateAPIConfigs()...)
@@ -314,6 +315,48 @@ func (t *Tree) catchPrecedesExecutable(tryID, catchID string) bool {
 		}
 	}
 	return false
+}
+
+// validateCaseUnits checks every case-unit anchors a real execution branch:
+// it must carry a case identity, hang directly under start (B1: anchors are
+// start's children, decomposition nodes do not become nodes), and have at
+// least one child (otherwise the case has no implementation).
+func (t *Tree) validateCaseUnits() []ValidationError {
+	var errs []ValidationError
+	for _, id := range Keys(t.Nodes) {
+		n := t.Nodes[id]
+		if n == nil || n.Type != NodeCaseUnit {
+			continue
+		}
+		if _, ok := CaseUnitBinding(n); !ok {
+			errs = append(errs, ValidationError{
+				NodeID: id, Code: "case_unit.binding_missing", Level: LevelError,
+				Message:        "case-unit 缺少用例身份绑定",
+				ExpectedFormat: `{"case_flow_id":<number>,"case_version_no":<number>,"case_node_id":"<id>","title":"<标题>"}`,
+			})
+		}
+		if n.Parent != t.Start {
+			errs = append(errs, ValidationError{
+				NodeID: id, Code: "case_unit.parent_invalid", Level: LevelError,
+				Message:        "case-unit 必须直接挂在 start 之下",
+				ExpectedFormat: `该 case-unit 的 parent 应为 start 节点 id`,
+			})
+		}
+		nchildren := 0
+		for _, c := range n.Children {
+			if cn := t.Nodes[c]; cn != nil {
+				nchildren++
+			}
+		}
+		if nchildren == 0 {
+			errs = append(errs, ValidationError{
+				NodeID: id, Code: "case_unit.unimplemented", Level: LevelError,
+				Message:        "case-unit 还没有任何执行节点，用例未实现",
+				ExpectedFormat: `在该 case-unit 下 create_node 至少一个执行节点`,
+			})
+		}
+	}
+	return errs
 }
 
 // validateLoops checks that loop nodes declare an array-valued input.

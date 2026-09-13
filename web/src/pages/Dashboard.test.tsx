@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import Dashboard from './Dashboard'
+import Dashboard, { greetingForHour } from './Dashboard'
 
 vi.mock('../api/dashboard', () => ({ getDashboard: vi.fn(async () => ({
   summary: { test_sets: 0, flows: 0, units: 0, recent_runs: 0, successful_runs: 0, failed_runs: 0, enabled_schedules: 0, providers: 0, models: 0 },
@@ -12,6 +12,17 @@ vi.mock('../api/dashboard', () => ({ getDashboard: vi.fn(async () => ({
 vi.mock('../store/session', () => ({ currentUser: () => ({ id: 1, username: '测试用户' }), restoreSession: () => ({ id: 1, username: '测试用户' }), clearSession: vi.fn() }))
 
 describe('Dashboard', () => {
+  it.each([
+    [0, '早上好'],
+    [11, '早上好'],
+    [12, '下午好'],
+    [17, '下午好'],
+    [18, '晚上好'],
+    [23, '晚上好'],
+  ])('uses the greeting for hour %i', (hour, greeting) => {
+    expect(greetingForHour(hour)).toBe(greeting)
+  })
+
   it('shows onboarding and empty state for a new user', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('创建测试集')).toBeTruthy())

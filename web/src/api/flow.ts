@@ -33,6 +33,8 @@ export interface Draft {
   tree: string
   system_prompt: string
   thinking?: string
+  /** 由用例流创建时记录的来源绑定（JSON 字符串，未绑定时为空）。 */
+  case_binding?: string
 }
 
 export interface FlowVersion {

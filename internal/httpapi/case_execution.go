@@ -12,9 +12,8 @@ import (
 )
 
 type caseGenerateReq struct {
-	ProviderID  uint                    `json:"provider_id"`
-	Selections  []service.CaseSelection `json:"selections"`
-	Instruction string                  `json:"instruction,omitempty"`
+	ProviderID  uint   `json:"provider_id"`
+	Instruction string `json:"instruction,omitempty"`
 }
 
 // handleGenerateFlowFromCases 从多个用例子树生成执行流。
@@ -24,8 +23,8 @@ func (s *Server) handleGenerateFlowFromCases(c *gin.Context) {
 		return
 	}
 	var req caseGenerateReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.ProviderID == 0 || len(req.Selections) == 0 {
-		writeErr(c, http.StatusBadRequest, "provider_id 与 selections 必填")
+	if err := c.ShouldBindJSON(&req); err != nil || req.ProviderID == 0 {
+		writeErr(c, http.StatusBadRequest, "provider_id 必填")
 		return
 	}
 	provider, ok := s.agentProvider(c, req.ProviderID)
@@ -43,7 +42,7 @@ func (s *Server) handleGenerateFlowFromCases(c *gin.Context) {
 	}
 	defer unlock()
 	var events []service.Event
-	_, err := service.GenerateFlowFromCases(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Selections, provider, service.AgentHooks{Emit: func(ev service.Event) {
+	_, err := service.GenerateFlowFromCases(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Instruction, provider, service.AgentHooks{Emit: func(ev service.Event) {
 		events = append(events, ev)
 	}})
 	if err != nil {
@@ -63,7 +62,7 @@ func (s *Server) caseGenerateSSE(c *gin.Context, flowID uint, req caseGenerateRe
 	done := make(chan error, 1)
 	go func() {
 		defer unlock()
-		_, err := service.GenerateFlowFromCases(ctx, s.DB, flowID, currentUserID(c), req.Selections, provider, service.AgentHooks{Emit: func(ev service.Event) {
+		_, err := service.GenerateFlowFromCases(ctx, s.DB, flowID, currentUserID(c), req.Instruction, provider, service.AgentHooks{Emit: func(ev service.Event) {
 			select {
 			case stream <- ev:
 			case <-ctx.Done():
@@ -93,17 +92,24 @@ func (s *Server) handleSaveFlowFromCases(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req struct {
-		Selections []service.CaseSelection `json:"selections"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || len(req.Selections) == 0 {
-		writeErr(c, http.StatusBadRequest, "selections 必填")
-		return
-	}
-	version, err := service.SaveExecutionFlowFromCases(s.DB, flowID, uid, req.Selections)
+	version, err := service.SaveExecutionFlowFromCases(s.DB, flowID, uid)
 	if err != nil {
 		writeErr(c, http.StatusBadRequest, "保存失败: "+err.Error())
 		return
 	}
 	writeJSON(c, http.StatusCreated, version)
+}
+
+// handleFlowCaseSources returns the case binding of an execution flow.
+func (s *Server) handleFlowCaseSources(c *gin.Context) {
+	flowID, _, ok := s.flowReadable(c)
+	if !ok {
+		return
+	}
+	view, err := service.FlowCaseSources(s.DB, flowID)
+	if err != nil {
+		writeErr(c, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	writeJSON(c, http.StatusOK, view)
 }

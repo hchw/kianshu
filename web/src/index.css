@@ -87,6 +87,7 @@
   --node-try: #805ad5;
   --node-adapter: #319795;
   --node-default: #4a5568;
+  --node-case-unit: #0ea5e9;
 
   color-scheme: light;
 }
@@ -147,6 +148,7 @@
   --node-try: #c4b5fd;
   --node-adapter: #5eead4;
   --node-default: #94a3b8;
+  --node-case-unit: #38bdf8;
 
   color-scheme: dark;
 }
@@ -1067,6 +1069,11 @@ h3 {
   --node-color: var(--node-adapter);
 }
 
+.react-flow__node.flow-node.type-case-unit {
+  --node-color: var(--node-case-unit);
+  border-style: dashed !important;
+}
+
 .react-flow__node.flow-node::before {
   content: '';
   position: absolute;
@@ -1830,3 +1837,99 @@ h3 {
 .tabs-trigger::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: transparent; }
 .tabs-trigger[data-state='active']::after { background: var(--primary); }
 .tabs-content { outline: none; }
+
+/* 通用模态遮罩：创建执行流等对话框 */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  padding: var(--space-4);
+}
+
+.modal-backdrop .card {
+  max-height: 90vh;
+  overflow: auto;
+}
+
+/* 用例流编辑器底部操作条 */
+.case-action-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.case-action-bar .spacer {
+  flex: 1;
+}
+
+.case-editor-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+/* 左侧节点面板下方的追加板块（关联用例） */
+.rail-extra {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.palette-rail.collapsed .rail-extra {
+  display: none;
+}
+
+.case-link-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.case-link-title {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.case-link-empty {
+  font-size: 12px;
+}
+
+.case-link-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.case-link-source {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-link-leaf {
+  font-size: 12px;
+  color: var(--muted);
+  padding-left: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-link-leaf::before {
+  content: '· ';
+}

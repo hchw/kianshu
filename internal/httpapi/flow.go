@@ -74,8 +74,9 @@ func (s *Server) handleCreateFlow(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Name         string  `json:"name"`
-		SystemPrompt *string `json:"system_prompt"`
+		Name           string                  `json:"name"`
+		SystemPrompt   *string                 `json:"system_prompt"`
+		CaseSelections []service.CaseSelection `json:"case_selections"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
 		writeErr(c, http.StatusBadRequest, "名称不能为空")
@@ -85,6 +86,23 @@ func (s *Server) handleCreateFlow(c *gin.Context) {
 	if req.SystemPrompt != nil {
 		systemPrompt = *req.SystemPrompt
 	}
+
+	// 从用例流创建：先校验每个来源用例流都有已保存版本并解析绑定，
+	// 再创建执行流。绑定为空时保持原空白创建路径不变。
+	if len(req.CaseSelections) > 0 {
+		f, _, err := service.CreateFlowFromCases(s.DB, testSetID, uid, req.Name, systemPrompt, req.CaseSelections)
+		if err != nil {
+			if errors.Is(err, service.ErrCaseFlowVersionRequired) {
+				writeErr(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeErr(c, http.StatusBadRequest, "绑定用例流失败: "+err.Error())
+			return
+		}
+		writeJSON(c, http.StatusCreated, f)
+		return
+	}
+
 	f, err := service.CreateFlow(s.DB, testSetID, uid, req.Name, systemPrompt)
 	if err != nil {
 		writeErr(c, http.StatusInternalServerError, "创建失败")
@@ -297,7 +315,7 @@ func (s *Server) handleGetDraft(c *gin.Context) {
 		writeErr(c, http.StatusNotFound, "草稿不存在")
 		return
 	}
-	writeJSON(c, http.StatusOK, gin.H{"flow_id": flowID, "test_set_id": ts, "name": d.Name, "tree": d.Tree, "system_prompt": d.SystemPrompt, "thinking": d.Thinking})
+	writeJSON(c, http.StatusOK, gin.H{"flow_id": flowID, "test_set_id": ts, "name": d.Name, "tree": d.Tree, "system_prompt": d.SystemPrompt, "thinking": d.Thinking, "case_binding": d.CaseBinding})
 }
 
 // handleUpdateDraft saves a flow's working draft. Each save creates a new

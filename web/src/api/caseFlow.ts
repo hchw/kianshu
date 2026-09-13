@@ -103,6 +103,11 @@ export async function getCaseTreeView(caseFlowID: number) {
   return data
 }
 
+export async function getCaseFlow(caseFlowID: number) {
+  const { data } = await api.get<CaseFlow>(`/case-flows/${caseFlowID}`)
+  return data
+}
+
 export async function addCaseNode(caseFlowID: number, revision: number, parentID: string, title: string) {
   const { data } = await api.post<CaseDraft>(`/case-flows/${caseFlowID}/nodes`, { revision, parent_id: parentID, title })
   return data
@@ -170,8 +175,67 @@ export async function duplicateCaseFlow(caseFlowID: number, name?: string) {
 }
 
 export async function listCaseNodeFlows(caseFlowID: number, nodeID: string) {
-  const { data } = await api.get<{ flows: unknown[] }>(`/case-flows/${caseFlowID}/nodes/${nodeID}/flows`)
-  return data.flows
+  const { data } = await api.get<{ node: CaseNodeStatus; flows: CaseNodeFlow[] }>(`/case-flows/${caseFlowID}/nodes/${nodeID}/flows`)
+  return data
+}
+
+export interface CaseNodeStatus {
+  status: string
+  last_run_result: string
+  last_run_at?: string
+}
+
+export interface CaseNodeFlow {
+  flow_id: number
+  flow_name: string
+  flow_version_id: number
+  version_no: number
+  anchor_node_id: string
+  case_version_no: number
+  enabled: boolean
+}
+
+/** 一个来源用例流 + 版本 + 选中的子树根。 */
+export interface CaseSelection {
+  case_flow_id: number
+  version_no?: number
+  root_ids: string[]
+}
+
+/** 基于用例流创建执行流（绑定来源，生成前即可追溯）。 */
+export async function createFlowFromCases(testSetID: number, name: string, selections: CaseSelection[], systemPrompt?: string) {
+  const { data } = await api.post<{ id: number; name: string }>(`/test-sets/${testSetID}/flows`, {
+    name,
+    system_prompt: systemPrompt,
+    case_selections: selections,
+  })
+  return data
+}
+
+/** 对已绑定的执行流运行用例驱动的生成（SSE 由调用方处理）。 */
+export async function generateFlowFromCases(flowID: number, providerID: number, instruction?: string) {
+  const { data } = await api.post(`/flow/flows/${flowID}/generate-from-cases`, { provider_id: providerID, instruction })
+  return data
+}
+
+/** 保存并启用版本，同时固化用例映射与覆盖状态。 */
+export async function saveFlowFromCases(flowID: number) {
+  const { data } = await api.post(`/flow/flows/${flowID}/save-from-cases`)
+  return data
+}
+
+export interface FlowCaseSources {
+  bound: boolean
+  binding?: {
+    sources: { case_flow_id: number; name: string; version_no: number }[]
+    leaves: { case_flow_id: number; case_node_id: string; title: string; path?: string }[]
+  }
+}
+
+/** 执行流 → 来源用例流/版本/用例。 */
+export async function getFlowCaseSources(flowID: number) {
+  const { data } = await api.get<FlowCaseSources>(`/flow/flows/${flowID}/case-sources`)
+  return data
 }
 
 export async function downloadCaseFlowXMind(caseFlowID: number, version?: number) {

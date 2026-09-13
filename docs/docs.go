@@ -3688,6 +3688,9 @@ const docTemplate = `{
         "model.FlowDraft": {
             "type": "object",
             "properties": {
+                "case_binding": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },

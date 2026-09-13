@@ -513,6 +513,8 @@ definitions:
     type: object
   model.FlowDraft:
     properties:
+      case_binding:
+        type: string
       created_at:
         type: string
       flow_id:

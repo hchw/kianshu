@@ -91,9 +91,16 @@ func (s *Server) handleAgentSubmit(c *gin.Context) {
 		return
 	}
 	var req agentSubmitReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.ProviderID == 0 || req.Instruction == "" {
-		writeErr(c, http.StatusBadRequest, "provider_id 与 instruction 必填")
+	if err := c.ShouldBindJSON(&req); err != nil || req.ProviderID == 0 {
+		writeErr(c, http.StatusBadRequest, "provider_id 必填")
 		return
+	}
+	// 绑定了用例流的执行流：生成目标来自用例骨架，指令只是补充，可留空。
+	if req.Instruction == "" {
+		if _, bound, err := service.GetFlowCaseBinding(s.DB, flowID); err != nil || !bound {
+			writeErr(c, http.StatusBadRequest, "instruction 必填")
+			return
+		}
 	}
 	provider, ok := s.agentProvider(c, req.ProviderID)
 	if !ok {
@@ -156,6 +163,11 @@ func (s *Server) runAgent(c *gin.Context, flowID uint, req agentSubmitReq, provi
 		}
 	}
 	if mode == service.ModeGenerate {
+		// 绑定用例流的执行流自动改为用例驱动生成：服务端按绑定预建 case-unit
+		// 骨架并注入用例结构与内容，用户指令作为补充要求叠加。
+		if _, bound, err := service.GetFlowCaseBinding(s.DB, flowID); err == nil && bound {
+			return service.GenerateFlowFromCases(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Instruction, provider, service.AgentHooks{Emit: emit})
+		}
 		return service.GenerateFlow(c.Request.Context(), s.DB, flowID, currentUserID(c), req.Instruction, provider, service.AgentHooks{Emit: emit})
 	}
 	return service.RunAgent(c.Request.Context(), s.DB, flowID, currentUserID(c), service.AgentOptions{

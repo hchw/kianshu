@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
+import { useMemo, useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
 import { useToast } from '../feedback/Toast'
@@ -19,7 +19,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { FlowTree } from '../../api/flow'
-import { layoutTree, linkAllowed, reconcileChildren, NODE_LABELS } from '../../lib/tree'
+import { layoutTree, linkAllowed, nodeConfig, reconcileChildren, NODE_LABELS } from '../../lib/tree'
 import { statusLabel } from '../results/ResultsPanel'
 import NodePanel from './NodePanel'
 
@@ -45,6 +45,8 @@ interface Props {
   testSetID: number
   /** 最近一次试运行的节点结果，key 为 node_id */
   nodeResults: Record<string, NodeRunStatus> | null
+  /** 左侧节点面板下方追加的板块（如关联用例列表）。 */
+  leftPanelExtra?: ReactNode
 }
 
 const COLORS: Record<string, string> = {
@@ -56,6 +58,7 @@ const COLORS: Record<string, string> = {
   catch: 'var(--danger)',
   'cache-set': 'var(--muted)',
   adapter: 'var(--node-adapter)',
+  'case-unit': 'var(--node-case-unit)',
 }
 
 const PALETTE_KEY = 'kianshu_palette_open'
@@ -109,7 +112,7 @@ export default function FlowCanvas(props: Props) {
   )
 }
 
-function CanvasInner({ tree, selected, onSelect, onSelectionRange, onTreeChange, onSaved, onDelete, testSetID, nodeResults }: Props) {
+function CanvasInner({ tree, selected, onSelect, onSelectionRange, onTreeChange, onSaved, onDelete, testSetID, nodeResults, leftPanelExtra }: Props) {
   const deleteNode = onDelete ?? (() => {})
   const [paletteOpen, setPaletteOpen] = useState(() => localStorage.getItem(PALETTE_KEY) !== '0')
   const togglePalette = () =>
@@ -140,13 +143,19 @@ function CanvasInner({ tree, selected, onSelect, onSelectionRange, onTreeChange,
       const pos = positions.get(id)!
       const color = COLORS[n?.type ?? ''] ?? 'var(--node-default)'
       const nr = nodeResults?.[id]
+      let label = `${NODE_LABELS[n?.type ?? ''] ?? n?.type}\n${id}`
+      if (n?.type === 'case-unit') {
+        // config 在草稿里是对象，nodeConfig 同时兼容字符串形态。
+        const title = nodeConfig(n).title
+        if (typeof title === 'string' && title) label = `用例分支 · ${title}`
+      }
       return {
         id,
         type: 'kianshu',
         position: { x: pos.x, y: pos.y },
         className: `flow-node type-${n?.type ?? ''}`,
         data: {
-          label: `${NODE_LABELS[n?.type ?? ''] ?? n?.type}\n${id}`,
+          label,
           nodeType: n?.type ?? '',
           status: nr?.status ?? undefined,
           nodeResult: nr ?? undefined,
@@ -268,9 +277,12 @@ function CanvasInner({ tree, selected, onSelect, onSelectionRange, onTreeChange,
   }
 
   const deleteSelected = () => {
-    for (const id of selectedIDs) {
-      if (tree.nodes[id]?.type !== 'start') deleteNode(id)
+    const ids = selectedIDs.filter((id) => tree.nodes[id]?.type !== 'start')
+    // 删除用例分支锚点等于移除该用例的实现，需要用户确认。
+    if (ids.some((id) => tree.nodes[id]?.type === 'case-unit') && !window.confirm('删除用例分支锚点会移除该用例的实现，确认继续？')) {
+      return
     }
+    for (const id of ids) deleteNode(id)
     clearSelection()
   }
 
@@ -392,6 +404,7 @@ function CanvasInner({ tree, selected, onSelect, onSelectionRange, onTreeChange,
             </div>
           ))}
         </div>
+        {leftPanelExtra && <div className="rail-extra">{leftPanelExtra}</div>}
         {!paletteOpen && <span className="rail-label">节点</span>}
       </aside>
       <div className="canvas-wrap">
