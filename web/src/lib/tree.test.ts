@@ -3,6 +3,7 @@ import {
   applyToolMutation,
   deleteNode,
   layoutTree,
+ nodeConfig,
   linkAllowed,
   parseTree,
   reconcileChildren,
@@ -301,5 +302,24 @@ describe('applyToolMutation', () => {
     // children should not duplicate
     const n2In = next.nodes.n1.children!.filter((c) => c === 'n2').length
     expect(n2In).toBe(1)
+  })
+})
+
+describe('nodeConfig', () => {
+  it('decodes an object config (the shape the draft API returns)', () => {
+    expect(nodeConfig({ config: { case_flow_id: 5, title: '用户名不存在' } })).toEqual({
+      case_flow_id: 5,
+      title: '用户名不存在',
+    })
+  })
+
+  it('decodes a JSON-string config', () => {
+    expect(nodeConfig({ config: '{"title":"正常登录成功"}' })).toEqual({ title: '正常登录成功' })
+  })
+
+  it('returns an empty map for missing or unparsable config', () => {
+    expect(nodeConfig(undefined)).toEqual({})
+    expect(nodeConfig({})).toEqual({})
+    expect(nodeConfig({ config: 'not-json' })).toEqual({})
   })
 })

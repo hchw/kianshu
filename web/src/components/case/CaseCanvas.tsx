@@ -21,6 +21,9 @@ type CaseCanvasProps = {
   root: CaseNode
   selected: string | null
   onSelect: (id: string | null) => void
+  onSelectionChange?: (ids: string[]) => void
+  /** 递增即清空画布选区（父级“清除选择”按钮用）。 */
+  clearSignal?: number
   onDelete?: (id: string) => void
   onPositionChange?: (id: string, x: number, y: number) => void
   revision?: number
@@ -82,16 +85,18 @@ function CaseNodeView({ id, data }: NodeProps) {
   )
 }
 
-function CanvasInner({ caseFlowID, root, selected, onSelect, onDelete, onPositionChange, revision = 0, onSaved = () => {} }: CaseCanvasProps) {
+function CanvasInner({ caseFlowID, root, selected, onSelect, onSelectionChange, clearSignal = 0, onDelete, onPositionChange, revision = 0, onSaved = () => {} }: CaseCanvasProps) {
   const { nodes: treeNodes, parents } = useMemo(() => flatten(root), [root])
   const layout = useMemo(() => layoutCaseTree(root), [root])
+  // 选区由 React Flow 内部维护（.selected 类）；这里【不】把 selected/selectedIDs
+  // 放进 initialNodes 依赖——否则每次选中都会重建整棵 nodes，React Flow 的选中
+  // 态被新节点对象覆盖（表现为“点了没真的选中”）且触发同步回环（卡顿）。
   const initialNodes = useMemo<Node[]>(() => treeNodes.map((node) => ({
     id: node.id,
     type: 'caseNode',
     position: { x: node.x ?? layout.get(node.id)?.x ?? 0, y: node.y ?? layout.get(node.id)?.y ?? 0 },
     data: { node },
-    className: selected === node.id ? 'case-flow-node-selected' : '',
-  })), [treeNodes, selected, layout])
+  })), [treeNodes, layout])
   const edges = useMemo<Edge[]>(() => Array.from(parents, ([child, parent]) => ({
     id: `${parent}-${child}`,
     source: parent,
@@ -99,12 +104,49 @@ function CanvasInner({ caseFlowID, root, selected, onSelect, onDelete, onPositio
     // 默认 bezier 曲线：自左向右的平滑弧线
   })), [parents])
   const [nodes, setNodes] = useState(initialNodes)
+  const [selectedIDs, setSelectedIDs] = useState<string[]>([])
   const draggingRef = useRef(false)
+  // 回调/选区用 ref 读取最新值，避免写进 effect 依赖引发额外重渲染
+  const selectionRef = useRef(selectedIDs)
+  selectionRef.current = selectedIDs
+  const selectRef = useRef(onSelect)
+  selectRef.current = onSelect
+  const notifyRef = useRef(onSelectionChange)
+  notifyRef.current = onSelectionChange
 
   // 树变化（非拖拽中）时同步节点
   useEffect(() => {
     if (!draggingRef.current) setNodes(initialNodes)
   }, [initialNodes])
+
+  // 父级“清除选择”
+  useEffect(() => {
+    if (clearSignal === 0) return
+    setSelectedIDs((cur) => (cur.length === 0 ? cur : []))
+    notifyRef.current?.([])
+    selectRef.current(null)
+  }, [clearSignal])
+
+  // 沿用 FlowCanvas 的选区策略：过程只更新画布内部选区，框选结束再通知父级，
+  // 避免每个命中节点都触发页面级重渲染。
+  const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[] }) => {
+    const ids = selectedNodes.map((n) => n.id).sort()
+    // 普通单击后 React Flow 可能先发一次空选择，不能让它覆盖单选态。
+    if (ids.length === 0 && selectionRef.current.length === 1) return
+    const prev = [...selectionRef.current].sort()
+    if (prev.length === ids.length && prev.every((id, index) => id === ids[index])) return
+    setSelectedIDs(ids)
+  }, [])
+
+  const handleSelectionEnd = useCallback(() => {
+    notifyRef.current?.(selectionRef.current)
+  }, [])
+
+  const handlePaneClick = useCallback(() => {
+    setSelectedIDs((cur) => (cur.length === 0 ? cur : []))
+    notifyRef.current?.([])
+    selectRef.current(null)
+  }, [])
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     for (const c of changes) {
@@ -126,10 +168,18 @@ function CanvasInner({ caseFlowID, root, selected, onSelect, onDelete, onPositio
           edges={edges}
           nodeTypes={{ caseNode: CaseNodeView }}
           onNodesChange={onNodesChange}
-          onNodeClick={(_, node) => onSelect(node.id)}
+          onNodeClick={(event, node) => {
+            // 普通单击：单选并打开节点详情；Ctrl/⌘ 单击交给 React Flow 管理多选。
+            if (!event.ctrlKey && !event.metaKey) {
+              setSelectedIDs([node.id])
+              selectRef.current(node.id)
+            }
+          }}
           onNodeDragStop={(_, node) => onPositionChange?.(node.id, node.position.x, node.position.y)}
-          onPaneClick={() => onSelect(null)}
+          onPaneClick={handlePaneClick}
           onNodesDelete={(deleted) => deleted.forEach((node) => onDelete?.(node.id))}
+          onSelectionChange={handleSelectionChange}
+          onSelectionEnd={handleSelectionEnd}
           selectionOnDrag
           panOnDrag
           selectionKeyCode="Control"

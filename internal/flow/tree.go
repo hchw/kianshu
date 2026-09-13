@@ -22,6 +22,11 @@ const (
 	NodeCatch    NodeType = "catch"
 	NodeCacheSet NodeType = "cache-set"
 	NodeAdapter  NodeType = "adapter"
+	// NodeCaseUnit is a pure grouping/passthrough node that anchors one test
+	// case's execution branch. It sequences its children and aggregates their
+	// outcome; it carries the case identity in its config so a saved version
+	// self-describes the case-to-execution mapping.
+	NodeCaseUnit NodeType = "case-unit"
 )
 
 // IOType enumerates the typed-key value kinds in a node's I/O contract.
@@ -86,6 +91,43 @@ func MarshalConfig(v any) (json.RawMessage, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// CaseUnitConfig is the config payload of a case-unit node. It binds the
+// branch to the case node it implements, so a version snapshot self-describes
+// the case-to-execution structural mapping.
+type CaseUnitConfig struct {
+	CaseFlowID    uint   `json:"case_flow_id"`
+	CaseVersionNo int    `json:"case_version_no"`
+	CaseNodeID    string `json:"case_node_id"`
+	Title         string `json:"title,omitempty"`
+}
+
+// CaseUnitBinding decodes a case-unit node's binding config. ok is false when
+// the node is not a case-unit or carries no usable case identity.
+func CaseUnitBinding(n *Node) (CaseUnitConfig, bool) {
+	var cfg CaseUnitConfig
+	if n == nil || n.Type != NodeCaseUnit || len(n.Config) == 0 {
+		return cfg, false
+	}
+	if err := json.Unmarshal(n.Config, &cfg); err != nil {
+		return cfg, false
+	}
+	if cfg.CaseNodeID == "" {
+		return cfg, false
+	}
+	return cfg, true
+}
+
+// CaseUnitNodes returns every case-unit node in deterministic (sorted ID) order.
+func (t *Tree) CaseUnitNodes() []*Node {
+	out := make([]*Node, 0)
+	for _, id := range Keys(t.Nodes) {
+		if n := t.Nodes[id]; n != nil && n.Type == NodeCaseUnit {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // ParseTree decodes a tree from its JSON string.

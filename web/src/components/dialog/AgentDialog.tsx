@@ -21,6 +21,8 @@ interface Props {
   onTreePreview: (t: FlowTree) => void
   selectedNodeIDs?: string[]
   onSelectedNodeIDsChange?: (ids: string[]) => void
+    /** 该执行流已绑定用例流：生成模式将由用例骨架驱动，指令可留空。 */
+    caseBound?: boolean
 }
 
 interface Message {
@@ -30,7 +32,7 @@ interface Message {
   tool_call_id?: string
 }
 
-export default function AgentDialog({ flowID, providers, tree, systemPrompt, initialThinking, onChanged, onTreePreview, selectedNodeIDs, onSelectedNodeIDsChange }: Props) {
+export default function AgentDialog({ flowID, providers, tree, systemPrompt, initialThinking, onChanged, onTreePreview, selectedNodeIDs, onSelectedNodeIDsChange, caseBound = false }: Props) {
   const [providerID, setProviderID] = useState(0)
   const [instruction, setInstruction] = useState('')
   const [mode, setMode] = useState<'edit' | 'generate'>('generate')
@@ -206,7 +208,8 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, ini
   }
 
   const submit = () => {
-    if (!instruction.trim()) return
+    // 绑定用例流的生成：目标来自用例骨架，无需再写指令。
+    if (!instruction.trim() && !(caseBound && mode === 'generate')) return
     if (!providerID) {
       setErr('请先在 Provider 配置中启用一个 LLM Provider')
       return
@@ -490,7 +493,9 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, ini
           <option value="max">最高</option>
         </select>
       </div>
-      <div className="muted">限定节点范围</div>
+      <div className="muted">限定节点范围
+        {caseBound && mode === 'generate' ? '（已关联用例流：生成按用例骨架实现，可补充要求，留空亦可）' : ''}
+      </div>
       <div className="node-tags">
         <button
           className={selected.length === nodeIDs.length ? 'tag on' : 'tag'}
@@ -511,7 +516,13 @@ export default function AgentDialog({ flowID, providers, tree, systemPrompt, ini
       </div>
       <textarea
         rows={3}
-        placeholder={mode === 'generate' ? '描述要生成的测试流,如:登录后查询订单列表' : '描述要修改的内容'}
+        placeholder={
+          mode === 'generate'
+            ? caseBound
+              ? '补充要求（可选），如：登录统一用鉴权头；留空则按用例骨架生成'
+              : '描述要生成的测试流,如:登录后查询订单列表'
+            : '描述要修改的内容'
+        }
         value={instruction}
         onChange={(e) => setInstruction(e.target.value)}
       />

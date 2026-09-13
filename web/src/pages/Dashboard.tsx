@@ -10,12 +10,18 @@ import { currentUser } from '../store/session'
 
 const timeText = (value: string) => new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 
+export function greetingForHour(hour: number): string {
+  if (hour < 12) return '早上好'
+  if (hour < 18) return '下午好'
+  return '晚上好'
+}
+
 export default function Dashboard() {
   const nav = useNavigate(); const user = currentUser(); const [data, setData] = useState<DashboardData>(); const [err, setErr] = useState(''); const [loading, setLoading] = useState(true)
   const load = async () => { setLoading(true); setErr(''); try { setData(await getDashboard()) } catch (e) { setErr(apiError(e)) } finally { setLoading(false) } }
   useEffect(() => { load() }, [])
   return <AppLayout title="首页" actions={<button className="primary" onClick={() => nav('/test-sets')}>创建测试集</button>}>
-    <div className="dashboard-head"><div><h1>早上好，{user?.username ?? '用户'}</h1><p className="muted">这里是你的接口集成测试工作台。</p></div></div>
+    <div className="dashboard-head"><div><h1>{greetingForHour(new Date().getHours())}，{user?.username ?? '用户'}</h1><p className="muted">这里是你的接口集成测试工作台。</p></div></div>
     {err && <><ErrorNote>{err}</ErrorNote><button onClick={load}><RefreshCw size={14} /> 重试</button></>}
     {loading ? <SkeletonList count={4} /> : data && <>
       <div className="dashboard-stats">

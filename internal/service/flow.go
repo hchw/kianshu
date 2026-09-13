@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github/hchw/kianshu/internal/caseflow"
 	"github/hchw/kianshu/internal/flow"
 	"github/hchw/kianshu/internal/model"
 	"github/hchw/kianshu/internal/scheduler"
@@ -146,6 +147,17 @@ func DeleteFlow(db *gorm.DB, sched *ScheduleManager, flowID uint) error {
 		return err
 	}
 	err := db.Transaction(func(tx *gorm.DB) error {
+		// 清理该执行流版本对应的用例映射，但不动 CaseNode 的实现状态与运行结果，
+		// 也不影响同一用例与其他执行流的关联。
+		var versionIDs []uint
+		if err := tx.Model(&model.FlowVersion{}).Where("flow_id = ?", flowID).Pluck("id", &versionIDs).Error; err != nil {
+			return err
+		}
+		if len(versionIDs) > 0 {
+			if err := tx.Where("flow_version_id IN ?", versionIDs).Delete(&model.CaseCoverage{}).Error; err != nil {
+				return err
+			}
+		}
 		for _, m := range []any{
 			&model.FlowDraft{},
 			&model.FlowVersion{},
@@ -438,38 +450,99 @@ func SaveAndEnable(db *gorm.DB, flowID, userID uint) (*model.FlowVersion, *flow.
 		return nil, nil, err
 	}
 
+	binding, hasBinding, err := GetFlowCaseBinding(db, flowID)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var version *model.FlowVersion
 	err = db.Transaction(func(tx *gorm.DB) error {
-		// Acquire the write lock before computing the next number so concurrent
-		// saves serialize. The enabled-flag clear is the first write statement:
-		// under SQLite it upgrades the deferred transaction to a single-writer
-		// transaction (losers wait on busy_timeout); on MySQL/Postgres the
-		// SELECT ... FOR UPDATE below locks the flow's version rows.
-		if err := tx.Model(&model.FlowVersion{}).
-			Where("flow_id = ? AND enabled = ?", flowID, true).
-			Update("enabled", false).Error; err != nil {
+		v, err := saveEnabledVersionTx(tx, flowID, userID, tree, d.SystemPrompt)
+		if err != nil {
 			return err
 		}
-		var maxNo int
-		q := tx.Model(&model.FlowVersion{}).Where("flow_id = ?", flowID)
-		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
-		if err := q.Select("COALESCE(MAX(version_no), 0)").Scan(&maxNo).Error; err != nil {
-			return err
+		version = v
+		// 由用例流创建的执行流：同一事务内固化用例到分支的映射并标记实现。
+		if hasBinding {
+			if err := applyCaseCoverageTx(tx, version, tree, binding); err != nil {
+				return err
+			}
 		}
-		version = &model.FlowVersion{
-			FlowID:       flowID,
-			VersionNo:    maxNo + 1,
-			Tree:         tree.String(),
-			SystemPrompt: d.SystemPrompt,
-			Enabled:      true,
-			CreatedBy:    userID,
-		}
-		return tx.Create(version).Error
+		return nil
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 	return version, &res, nil
+}
+
+// saveEnabledVersionTx disables the previous version and creates the next
+// enabled version inside the caller's transaction.
+func saveEnabledVersionTx(tx *gorm.DB, flowID, userID uint, tree *flow.Tree, systemPrompt string) (*model.FlowVersion, error) {
+	// Acquire the write lock before computing the next number so concurrent
+	// saves serialize. The enabled-flag clear is the first write statement:
+	// under SQLite it upgrades the deferred transaction to a single-writer
+	// transaction (losers wait on busy_timeout); on MySQL/Postgres the
+	// SELECT... FOR UPDATE below locks the flow's version rows.
+	if err := tx.Model(&model.FlowVersion{}).
+		Where("flow_id = ? AND enabled = ?", flowID, true).
+		Update("enabled", false).Error; err != nil {
+		return nil, err
+	}
+	var maxNo int
+	q := tx.Model(&model.FlowVersion{}).Where("flow_id = ?", flowID)
+	q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+	if err := q.Select("COALESCE(MAX(version_no), 0)").Scan(&maxNo).Error; err != nil {
+		return nil, err
+	}
+	v := &model.FlowVersion{
+		FlowID:       flowID,
+		VersionNo:    maxNo + 1,
+		Tree:         tree.String(),
+		SystemPrompt: systemPrompt,
+		Enabled:      true,
+		CreatedBy:    userID,
+	}
+	if err := tx.Create(v).Error; err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// applyCaseCoverageTx freezes the case-to-execution mapping for an enabled
+// version and marks each implemented bound case covered. It runs inside the
+// version-save transaction so a failure leaves neither mapping nor status.
+func applyCaseCoverageTx(tx *gorm.DB, version *model.FlowVersion, tree *flow.Tree, binding *CaseBinding) error {
+	snapshot, _ := json.Marshal(binding)
+	for _, n := range tree.CaseUnitNodes() {
+		cfg, ok := flow.CaseUnitBinding(n)
+		if !ok || len(n.Children) == 0 {
+			continue
+		}
+		var cn model.CaseNode
+		if err := tx.Where("case_flow_id = ? AND node_key = ?", cfg.CaseFlowID, cfg.CaseNodeID).First(&cn).Error; err != nil {
+			return err
+		}
+		var existing model.CaseCoverage
+		err := tx.Where("case_node_id = ? AND flow_version_id = ? AND anchor_node_id = ?", cn.ID, version.ID, n.ID).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := tx.Create(&model.CaseCoverage{
+				CaseNodeID:    cn.ID,
+				FlowVersionID: version.ID,
+				AnchorNodeID:  n.ID,
+				CaseVersionNo: cfg.CaseVersionNo,
+				Snapshot:      string(snapshot),
+			}).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		if err := tx.Model(&cn).Update("status", caseflow.StatusCovered).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ListVersions returns the versions of a flow, newest first.

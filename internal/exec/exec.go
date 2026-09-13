@@ -206,6 +206,14 @@ func (e *engine) runNode(id string, parentOut any) Status {
 			status = StatusFailed
 		}
 	}
+	// case-unit 是用例分支的聚合点：将其记录状态置为子树的聚合结果，
+	// 以便运行后把"该用例通过/失败"回填到用例节点（C2）。
+	// 仅对新增类型生效，不改动现有节点的记录语义。
+	if n.Type == flow.NodeCaseUnit {
+		if r, ok := e.results[id]; ok && r != nil {
+			r.Status = status
+		}
+	}
 	e.results[id].StartedAt = started
 	e.results[id].FinishedAt = time.Now()
 	return status
@@ -226,6 +234,10 @@ func (e *engine) execute(n *flow.Node, input any) (any, error) {
 		return e.cacheSetOutput(n, input)
 	case flow.NodeCatch:
 		// Normal path: pass through the preceding node's output unchanged.
+		return input, nil
+	case flow.NodeCaseUnit:
+		// 用例分支锚点：纯分组/透传，不产生新数据。子节点按顺序执行，
+		// 分支通过/失败由通用 runNode 路径聚合（任一子节点失败即分支失败）。
 		return input, nil
 	default:
 		return nil, fmt.Errorf("未知节点类型: %s", n.Type)

@@ -590,12 +590,17 @@ func (s *Server) handleListNodeFlows(c *gin.Context) {
 		return
 	}
 	nodeID := c.Param("nodeID")
-	versions, err := service.ListCaseNodeFlows(s.DB, cfID, nodeID)
+	node, err := service.GetCaseNode(s.DB, cfID, nodeID)
+	if err != nil {
+		writeErr(c, http.StatusNotFound, "用例节点不存在")
+		return
+	}
+	flows, err := service.ListCaseNodeFlows(s.DB, cfID, nodeID)
 	if err != nil {
 		writeErr(c, http.StatusInternalServerError, "查询失败")
 		return
 	}
-	writeJSON(c, http.StatusOK, gin.H{"flows": versions})
+	writeJSON(c, http.StatusOK, gin.H{"node": node, "flows": flows})
 }
 
 func parseIDInt(c *gin.Context, name string) (int, bool) {

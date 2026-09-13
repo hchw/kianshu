@@ -175,7 +175,10 @@ export default function TestSetDetail() {
           </div>
           </>}
           {tab === 'execution' && <div className="card">
-            <h3>测试流</h3>
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <h3>测试流</h3>
+              <button className="link" onClick={() => setTab('case')}>从用例创建执行流 →</button>
+            </div>
             <form className="row" onSubmit={create}>
               <input
                 placeholder="新测试流名称"

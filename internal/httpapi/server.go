@@ -182,6 +182,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/flow/flows/:flowID/agent/compress", s.handleAgentCompress)
 		auth.POST("/flow/flows/:flowID/generate-from-cases", s.handleGenerateFlowFromCases)
 		auth.POST("/flow/flows/:flowID/save-from-cases", s.handleSaveFlowFromCases)
+		auth.GET("/flow/flows/:flowID/case-sources", s.handleFlowCaseSources)
 
 		auth.GET("/providers", s.handleListProviders)
 		auth.POST("/providers", s.handleCreateProvider)

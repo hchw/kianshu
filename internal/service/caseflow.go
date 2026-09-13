@@ -17,10 +17,11 @@ import (
 
 // Case Flow 领域错误。
 var (
-	ErrCaseFlowNotFound   = errors.New("用例流不存在")
-	ErrCaseSourceRequired = errors.New("至少需要一个背景文档或接口范围来源")
-	ErrCaseTreeValidation = errors.New("用例树校验失败")
-	ErrCaseSourceConflict = errors.New("来源引用冲突")
+	ErrCaseFlowNotFound        = errors.New("用例流不存在")
+	ErrCaseSourceRequired      = errors.New("至少需要一个背景文档或接口范围来源")
+	ErrCaseTreeValidation      = errors.New("用例树校验失败")
+	ErrCaseSourceConflict      = errors.New("来源引用冲突")
+	ErrCaseFlowVersionRequired = errors.New("用例流没有已保存版本")
 )
 
 // SourceInput 描述一次来源绑定请求。
@@ -441,6 +442,12 @@ func ResolveCaseSources(db *gorm.DB, caseFlowID uint) ([]ResolvedSource, error) 
 	if err != nil {
 		return nil, err
 	}
+	return resolveCaseSourceRows(db, caseFlowID, sources)
+}
+
+// resolveCaseSourceRows resolves source rows — current or snapshotted in a
+// version — into the content actually used at generation time.
+func resolveCaseSourceRows(db *gorm.DB, caseFlowID uint, sources []model.CaseSource) ([]ResolvedSource, error) {
 	out := make([]ResolvedSource, 0, len(sources))
 	for _, s := range sources {
 		switch s.Kind {
@@ -652,17 +659,43 @@ func AssociateCaseFlowVersion(db *gorm.DB, caseFlowID uint, flowVersionID uint, 
 	})
 }
 
-// ListCaseNodeFlows returns associated execution flow versions for a node.
-func ListCaseNodeFlows(db *gorm.DB, caseFlowID uint, nodeID string) ([]model.FlowVersion, error) {
+// GetCaseNode returns a case node's stable status and latest run result.
+func GetCaseNode(db *gorm.DB, caseFlowID uint, nodeID string) (*model.CaseNode, error) {
 	var n model.CaseNode
 	if err := db.Where("case_flow_id = ? AND node_key = ?", caseFlowID, nodeID).First(&n).Error; err != nil {
 		return nil, err
 	}
-	var versions []model.FlowVersion
-	err := db.Model(&model.FlowVersion{}).
-		Joins("JOIN case_coverages ON case_coverages.flow_version_id = flow_versions.id").
+	return &n, nil
+}
+
+// CaseNodeFlow is one execution flow version implementing a case node.
+type CaseNodeFlow struct {
+	FlowID        uint   `json:"flow_id"`
+	FlowName      string `json:"flow_name"`
+	FlowVersionID uint   `json:"flow_version_id"`
+	VersionNo     int    `json:"version_no"`
+	AnchorNodeID  string `json:"anchor_node_id"`
+	CaseVersionNo int    `json:"case_version_no"`
+	Enabled       bool   `json:"enabled"`
+}
+
+// ListCaseNodeFlows returns associated execution flow versions for a node,
+// including the implementing flow name and the branch anchor.
+func ListCaseNodeFlows(db *gorm.DB, caseFlowID uint, nodeID string) ([]CaseNodeFlow, error) {
+	var n model.CaseNode
+	if err := db.Where("case_flow_id = ? AND node_key = ?", caseFlowID, nodeID).First(&n).Error; err != nil {
+		return nil, err
+	}
+	out := []CaseNodeFlow{}
+	err := db.Table("case_coverages").
+		Select("test_flows.id AS flow_id, test_flows.name AS flow_name, "+
+			"flow_versions.id AS flow_version_id, flow_versions.version_no AS version_no, "+
+			"case_coverages.anchor_node_id AS anchor_node_id, case_coverages.case_version_no AS case_version_no, "+
+			"flow_versions.enabled AS enabled").
+		Joins("JOIN flow_versions ON flow_versions.id = case_coverages.flow_version_id").
+		Joins("JOIN test_flows ON test_flows.id = flow_versions.flow_id").
 		Where("case_coverages.case_node_id = ?", n.ID).
 		Order("flow_versions.version_no desc").
-		Find(&versions).Error
-	return versions, err
+		Scan(&out).Error
+	return out, err
 }

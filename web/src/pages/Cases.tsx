@@ -148,7 +148,7 @@ export default function Cases() {
         <Tabs.Content value="cases" className="tabs-content stack">
           <div className="row"><input placeholder="搜索用例流 / 测试集" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           {visible.map((g) => (
-            <GroupCard key={g.testSet.id} testSet={g.testSet} items={g.caseFlows} emptyText="该测试集暂无用例流" editingKey={editingKey} setEditingKey={setEditingKey} itemURL={(id) => `/case-flows/${id}`} openLabel="打开用例流编辑器" commitRename={renameCase} remove={removeCaseFlow} duplicate={duplicateCase} />
+            <GroupCard key={g.testSet.id} testSet={g.testSet} items={g.caseFlows} emptyText="该测试集暂无用例流" editingKey={editingKey} setEditingKey={setEditingKey} itemURL={(id) => `/case-flows/${id}`} openLabel="创建执行流" commitRename={renameCase} remove={removeCaseFlow} duplicate={duplicateCase} />
           ))}
           {visible.length === 0 && <div className="muted">没有匹配的测试集</div>}
         </Tabs.Content>

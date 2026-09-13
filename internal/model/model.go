@@ -109,6 +109,8 @@ type TestFlow struct {
 // FlowDraft is the editable working state of a flow: a whole-tree JSON snapshot
 // plus the flow-scoped system prompt document (business context/signing rules
 // supplied by the user, injected into the agent system message per submission).
+// CaseBinding records, when the flow was created from a case flow, the bound
+// case flow versions, selected subtree roots and resolved source snapshot.
 type FlowDraft struct {
 	ID           uint      `gorm:"primarykey" json:"id" example:"1"`
 	FlowID       uint      `gorm:"index;not null" json:"flow_id" example:"1"`
@@ -116,6 +118,7 @@ type FlowDraft struct {
 	Tree         string    `gorm:"type:text" json:"tree"`
 	SystemPrompt string    `gorm:"type:text" json:"system_prompt"`
 	Thinking     string    `gorm:"size:32;default:disabled" json:"thinking"`
+	CaseBinding  string    `gorm:"type:text" json:"case_binding,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -228,14 +231,26 @@ type CaseSource struct {
 }
 
 // CaseNode stores stable case identity/status independently from tree snapshots.
+// Status is the user-maintained implementation state (covered/uncovered);
+// LastRunResult is the system-backfilled latest execution outcome of the
+// bound execution flow branch, kept deliberately separate from Status.
 type CaseNode struct {
-	ID         uint      `gorm:"primarykey" json:"id"`
-	CaseFlowID uint      `gorm:"index;not null" json:"case_flow_id"`
-	NodeKey    string    `gorm:"size:128;not null" json:"node_key"`
-	Status     string    `gorm:"size:16;not null;default:uncovered" json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID            uint       `gorm:"primarykey" json:"id"`
+	CaseFlowID    uint       `gorm:"index;not null" json:"case_flow_id"`
+	NodeKey       string     `gorm:"size:128;not null" json:"node_key"`
+	Status        string     `gorm:"size:16;not null;default:uncovered" json:"status"`
+	LastRunResult string     `gorm:"size:16;not null;default:not_run" json:"last_run_result"`
+	LastRunAt     *time.Time `json:"last_run_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
+
+// Case execution-face run result values for CaseNode.LastRunResult.
+const (
+	CaseRunNotRun = "not_run"
+	CaseRunPassed = "passed"
+	CaseRunFailed = "failed"
+)
 
 // CaseFlowSession persists the independent Case Flow Agent dialog history.
 type CaseFlowSession struct {
@@ -249,11 +264,16 @@ type CaseFlowSession struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// CaseCoverage links a case node to an immutable execution flow version.
+// CaseCoverage links a case node to an execution flow version, optionally to
+// the concrete case-unit anchor that implements the case in that version. A
+// case may map to several anchors in one version, so uniqueness includes the
+// anchor id.
 type CaseCoverage struct {
 	ID            uint      `gorm:"primarykey" json:"id"`
-	CaseNodeID    uint      `gorm:"uniqueIndex:idx_case_coverage" json:"case_node_id"`
-	FlowVersionID uint      `gorm:"uniqueIndex:idx_case_coverage" json:"flow_version_id"`
+	CaseNodeID    uint      `gorm:"uniqueIndex:idx_case_coverage_anchor" json:"case_node_id"`
+	FlowVersionID uint      `gorm:"uniqueIndex:idx_case_coverage_anchor" json:"flow_version_id"`
+	AnchorNodeID  string    `gorm:"size:128;uniqueIndex:idx_case_coverage_anchor" json:"anchor_node_id"`
+	CaseVersionNo int       `json:"case_version_no"`
 	Snapshot      string    `gorm:"type:text" json:"snapshot"`
 	CreatedAt     time.Time `json:"created_at"`
 }
@@ -271,12 +291,22 @@ type FlowSchedule struct {
 
 // AutoMigrate creates all tables for the foundation data layer.
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&User{}, &Session{}, &TestSet{}, &TestSetMember{},
 		&Import{}, &Provider{}, &TestUnit{},
 		&TestFlow{}, &FlowDraft{}, &FlowVersion{},
 		&ExecutionLog{}, &FlowSession{}, &FlowSchedule{},
 		&BackgroundDocument{}, &CaseFlow{}, &CaseFlowDraft{}, &CaseFlowVersion{},
 		&CaseSource{}, &CaseNode{}, &CaseCoverage{}, &CaseFlowSession{},
-	)
+	); err != nil {
+		return err
+	}
+	// 旧的 (case_node_id, flow_version_id) 唯一索引会阻止"一个用例对应多个
+	// 分支锚点"；新模型使用 idx_case_coverage_anchor。存在旧索引时丢弃它。
+	if db.Migrator().HasIndex(&CaseCoverage{}, "idx_case_coverage") {
+		if err := db.Migrator().DropIndex(&CaseCoverage{}, "idx_case_coverage"); err != nil {
+			return err
+		}
+	}
+	return nil
 }

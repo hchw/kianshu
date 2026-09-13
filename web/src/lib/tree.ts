@@ -24,6 +24,24 @@ export function parseTree(json: string | null | undefined): FlowTree {
   }
 }
 
+// nodeConfig normalizes a node config: the draft tree stores it as an object
+// (the API returns raw JSON), but older/hand-written payloads may carry a JSON
+// string. Both shapes must decode to the same map — reading only the string
+// form silently drops fields such as `title` on case-unit anchors.
+export function nodeConfig(n: { config?: unknown } | null | undefined): Record<string, unknown> {
+ const c = n?.config
+ if (!c) return {}
+ if (typeof c === 'string') {
+ try {
+ const parsed = JSON.parse(c)
+ return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+ } catch {
+ return {}
+ }
+ }
+ return typeof c === 'object' ? (c as Record<string, unknown>) : {}
+}
+
 // layoutTree places nodes on a level grid: level-order traversal assigns each
 // node x = layer*W and y = ordinal-in-layer*H. Nodes with explicit x/y
 // coordinates (user-placed) keep them and consume no grid slot.
@@ -227,6 +245,7 @@ export const NODE_LABELS: Record<string, string> = {
   catch: 'catch',
   'cache-set': '缓存',
   adapter: '转换',
+  'case-unit': '用例分支',
 }
 
 // applyToolMutation replays a single agent tool event on a flow tree,
