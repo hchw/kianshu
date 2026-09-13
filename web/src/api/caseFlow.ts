@@ -164,6 +164,11 @@ export async function deleteCaseFlow(caseFlowID: number) {
   await api.delete(`/case-flows/${caseFlowID}`)
 }
 
+export async function duplicateCaseFlow(caseFlowID: number, name?: string) {
+  const { data } = await api.post<CaseFlow>(`/case-flows/${caseFlowID}/duplicate`, { name })
+  return data
+}
+
 export async function listCaseNodeFlows(caseFlowID: number, nodeID: string) {
   const { data } = await api.get<{ flows: unknown[] }>(`/case-flows/${caseFlowID}/nodes/${nodeID}/flows`)
   return data.flows

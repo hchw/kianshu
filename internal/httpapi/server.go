@@ -125,6 +125,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/test-sets/:id/case-flows", s.handleCreateCaseFlow)
 		auth.GET("/case-flows/:caseFlowID", s.handleGetCaseFlow)
 		auth.DELETE("/case-flows/:caseFlowID", s.handleDeleteCaseFlow)
+		auth.POST("/case-flows/:caseFlowID/duplicate", s.handleDuplicateCaseFlow)
 		auth.PATCH("/case-flows/:caseFlowID", s.handleRenameCaseFlow)
 		auth.GET("/case-flows/:caseFlowID/draft", s.handleGetCaseFlowDraft)
 		auth.PUT("/case-flows/:caseFlowID/draft", s.handleUpdateCaseFlowDraft)

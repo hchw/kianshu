@@ -270,6 +270,26 @@ func (s *Server) handleRenameCaseFlow(c *gin.Context) {
 	writeJSON(c, http.StatusOK, cf)
 }
 
+func (s *Server) handleDuplicateCaseFlow(c *gin.Context) {
+	cfID, uid, ok := s.caseFlowEditable(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeErr(c, http.StatusBadRequest, "请求体不合法")
+		return
+	}
+	cf, err := service.DuplicateCaseFlow(s.DB, cfID, uid, req.Name)
+	if err != nil {
+		writeErr(c, http.StatusInternalServerError, "复制失败")
+		return
+	}
+	writeJSON(c, http.StatusCreated, cf)
+}
+
 func (s *Server) handleDeleteCaseFlow(c *gin.Context) {
 	cfID, _, ok := s.caseFlowEditable(c)
 	if !ok {

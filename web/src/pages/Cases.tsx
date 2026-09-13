@@ -6,13 +6,13 @@ import PopConfirm from '../components/dialog/PopConfirm'
 import { apiError } from '../api/client'
 import { useToast } from '../components/feedback/Toast'
 import { listTestSets, listFlows, type TestSet, type FlowSummary } from '../api/testset'
-import { deleteFlow, renameFlow } from '../api/flow'
-import { listCaseFlows, renameCaseFlow, deleteCaseFlow, type CaseFlow } from '../api/caseFlow'
+import { deleteFlow, renameFlow, duplicateFlow } from '../api/flow'
+import { listCaseFlows, renameCaseFlow, deleteCaseFlow, duplicateCaseFlow, type CaseFlow } from '../api/caseFlow'
 
 type Group = { testSet: TestSet; caseFlows: CaseFlow[]; flows: FlowSummary[] }
 
 /** 单条流：改名（行内编辑）+ 删除（确认弹窗）+ 打开编辑器。 */
-function FlowRow({ name, url, openLabel, editing, onEditStart, onCommitRename, onDelete }: {
+function FlowRow({ name, url, openLabel, editing, onEditStart, onCommitRename, onDelete, onDuplicate }: {
   name: string
   url: string
   openLabel: string
@@ -20,6 +20,7 @@ function FlowRow({ name, url, openLabel, editing, onEditStart, onCommitRename, o
   onEditStart: () => void
   onCommitRename: (name: string) => Promise<void>
   onDelete: () => Promise<void>
+  onDuplicate: () => Promise<void>
 }) {
   const [draft, setDraft] = useState(name)
   useEffect(() => { if (editing) setDraft(name) }, [editing, name])
@@ -37,6 +38,7 @@ function FlowRow({ name, url, openLabel, editing, onEditStart, onCommitRename, o
       <Link to={url}><span className="strong">{name}</span></Link>
       <span style={{ flex: 1 }} />
       <button className="link" onClick={() => { setDraft(name); onEditStart() }}>改名</button>
+      <button className="link" onClick={() => void onDuplicate()}>复制</button>
       <PopConfirm danger message={`确认删除「${name}」？该操作不可恢复。`} onConfirm={() => onDelete()}>
         <button className="link danger">删除</button>
       </PopConfirm>
@@ -45,7 +47,7 @@ function FlowRow({ name, url, openLabel, editing, onEditStart, onCommitRename, o
   )
 }
 
-function GroupCard({ testSet, items, emptyText, editingKey, setEditingKey, itemURL, openLabel, commitRename, remove }: {
+function GroupCard({ testSet, items, emptyText, editingKey, setEditingKey, itemURL, openLabel, commitRename, remove, duplicate }: {
   testSet: TestSet
   items: { id: number; name: string }[]
   emptyText: string
@@ -55,6 +57,7 @@ function GroupCard({ testSet, items, emptyText, editingKey, setEditingKey, itemU
   openLabel: string
   commitRename: (id: number, name: string) => Promise<void>
   remove: (id: number) => Promise<void>
+  duplicate: (id: number, name: string) => Promise<void>
 }) {
   return (
     <section className="card">
@@ -76,6 +79,7 @@ function GroupCard({ testSet, items, emptyText, editingKey, setEditingKey, itemU
                 onEditStart={() => setEditingKey(editingKey === key ? null : key)}
                 onCommitRename={async (name) => { setEditingKey(null); await commitRename(f.id, name) }}
                 onDelete={() => remove(f.id)}
+                onDuplicate={() => duplicate(f.id, `${f.name} 副本`)}
               />
             )
           })}
@@ -121,6 +125,8 @@ export default function Cases() {
   const removeCaseFlow = async (id: number) => { await deleteCaseFlow(id) }
   const renameFlowByID = async (id: number, name: string) => { await renameFlow(id, name) }
   const removeFlow = async (id: number) => { await deleteFlow(id) }
+  const duplicateCase = async (id: number, name: string) => { await duplicateCaseFlow(id, name); toast.success('用例流已复制'); await load() }
+  const duplicateFlowByID = async (id: number, name: string) => { await duplicateFlow(id, name); toast.success('执行流已复制'); await load() }
 
   const keyword = q.trim().toLowerCase()
   const visible = groups
@@ -142,14 +148,14 @@ export default function Cases() {
         <Tabs.Content value="cases" className="tabs-content stack">
           <div className="row"><input placeholder="搜索用例流 / 测试集" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           {visible.map((g) => (
-            <GroupCard key={g.testSet.id} testSet={g.testSet} items={g.caseFlows} emptyText="该测试集暂无用例流" editingKey={editingKey} setEditingKey={setEditingKey} itemURL={(id) => `/case-flows/${id}`} openLabel="打开用例流编辑器" commitRename={renameCase} remove={removeCaseFlow} />
+            <GroupCard key={g.testSet.id} testSet={g.testSet} items={g.caseFlows} emptyText="该测试集暂无用例流" editingKey={editingKey} setEditingKey={setEditingKey} itemURL={(id) => `/case-flows/${id}`} openLabel="打开用例流编辑器" commitRename={renameCase} remove={removeCaseFlow} duplicate={duplicateCase} />
           ))}
           {visible.length === 0 && <div className="muted">没有匹配的测试集</div>}
         </Tabs.Content>
         <Tabs.Content value="flows" className="tabs-content stack">
           <div className="row"><input placeholder="搜索执行流 / 测试集" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           {visible.map((g) => (
-            <GroupCard key={g.testSet.id} testSet={g.testSet} items={g.flows} emptyText="该测试集暂无执行流" editingKey={editingKey} setEditingKey={setEditingKey} itemURL={(id) => `/flows/${id}`} openLabel="打开执行流编辑器" commitRename={renameFlowByID} remove={removeFlow} />
+            <GroupCard key={g.testSet.id} testSet={g.testSet} items={g.flows} emptyText="该测试集暂无执行流" editingKey={editingKey} setEditingKey={setEditingKey} itemURL={(id) => `/flows/${id}`} openLabel="打开执行流编辑器" commitRename={renameFlowByID} remove={removeFlow} duplicate={duplicateFlowByID} />
           ))}
           {visible.length === 0 && <div className="muted">没有匹配的测试集</div>}
         </Tabs.Content>
